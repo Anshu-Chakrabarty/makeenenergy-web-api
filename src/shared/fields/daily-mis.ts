@@ -31,6 +31,9 @@ export const DAILY_MIS_FIELDS = [
     options: ['0', '1', '2', '3'],
   }),
   field(6, 'otHours', 'No. of OT hours', S.header, 'hours', { unit: 'h', maxValue: 24 }),
+  field(61, 'carouselsOperated', 'No. of carousels operated', S.header, 'select', {
+    options: ['0', '1', '2', '3'],
+  }),
   field(7, 'enteredBy', 'Entered by', S.header, 'shown', { readOnly: true }),
   field(8, 'status', 'Status', S.header, 'shown', { readOnly: true }),
 
@@ -44,6 +47,14 @@ export const DAILY_MIS_FIELDS = [
     unit: 'count',
   }),
   field(16, 'cylFilled19', 'No. of cylinders filled — 19 kg', S.stock, 'count', { unit: 'count' }),
+  field(
+    62,
+    'cylFilledOther',
+    'No. of cylinders filled — 5 kg, 35 kg, 47.5 kg and 425 kg',
+    S.stock,
+    'count',
+    { unit: 'count' },
+  ),
   field(17, 'prcnReturn', 'PRCN return', S.stock, 'mt', MT),
   field(18, 'closingBookStock', 'Closing book stock', S.stock, 'mt', {
     ...MT,

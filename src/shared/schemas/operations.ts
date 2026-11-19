@@ -127,6 +127,13 @@ export const plantSaveSchema = z.object({
       return n;
     }),
   status: z.enum(PLANT_STATUSES, { error: FIELD_MESSAGES.option }),
+  gstNumber: textValue(20),
+  fmCoordinator: textValue(160),
+  zonalManager: textValue(160),
+  officer1: textValue(160),
+  officer2: textValue(160),
+  financeOfficer: textValue(160),
+  safetyOfficer: textValue(160),
 });
 export type PlantSaveInput = z.infer<typeof plantSaveSchema>;
 
@@ -151,6 +158,7 @@ const volumeRow = z.object({
 const equipmentRow = z.object({
   quantity: intValue().transform((v) => v ?? 0),
   note: textValue(300),
+  serialNumbers: textValue(300),
 });
 
 /** Plant details (PLT-D1…D18) — Plant Manager. */
@@ -162,7 +170,10 @@ export const plantDetailsSchema = z
     equipment: z
       .object(
         Object.fromEntries(
-          EQUIPMENT_TYPES.map((e) => [e, equipmentRow.default({ quantity: 0, note: null })]),
+          EQUIPMENT_TYPES.map((e) => [
+            e,
+            equipmentRow.default({ quantity: 0, note: null, serialNumbers: null }),
+          ]),
         ) as Record<EquipmentType, z.ZodDefault<typeof equipmentRow>>,
       )
       .default({} as never),

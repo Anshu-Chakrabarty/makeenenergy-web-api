@@ -8,13 +8,14 @@ import {
   settingAllows,
 } from './index';
 
-describe('module settings are bundles, not a ladder (D-10)', () => {
-  it('Approve gives view, download and approve — but not submit', () => {
-    expect(capabilitiesOf('APPROVE')).toEqual(['VIEW', 'DOWNLOAD', 'APPROVE']);
-    expect(settingAllows('APPROVE', 'SUBMIT')).toBe(false);
+describe('module settings stack read, write, then approve', () => {
+  it('Approve gives view, download, submit and approve', () => {
+    expect(capabilitiesOf('APPROVE')).toEqual(['VIEW', 'DOWNLOAD', 'SUBMIT', 'APPROVE']);
+    expect(settingAllows('APPROVE', 'SUBMIT')).toBe(true);
   });
-  it('Submit does not give download; Hidden gives nothing', () => {
-    expect(settingAllows('SUBMIT', 'DOWNLOAD')).toBe(false);
+  it('Submit includes download; Hidden gives nothing', () => {
+    expect(settingAllows('SUBMIT', 'DOWNLOAD')).toBe(true);
+    expect(capabilitiesOf('SUBMIT')).toEqual(['VIEW', 'DOWNLOAD', 'SUBMIT']);
     expect(capabilitiesOf('HIDDEN')).toEqual([]);
   });
 });

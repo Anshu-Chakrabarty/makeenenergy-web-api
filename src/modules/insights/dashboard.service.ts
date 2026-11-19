@@ -353,6 +353,9 @@ export class DashboardService {
     scope: PlantScope,
     period: DashboardPeriod | null,
   ): Promise<DashboardExceptionRow[]> {
+    const lineTotal = await tx.exceptionFormField.count({
+      where: { kind: 'yes_no', form: { code: 'DAILY', active: true } },
+    });
     const rows = await tx.dailyException.findMany({
       where: this.exceptionWhere(scope, period),
       select: {
@@ -373,6 +376,7 @@ export class DashboardService {
       problemHighlight: r.problemHighlight,
       status: r.status === 'PARTIAL' ? 'PARTIAL' : 'PENDING',
       answered: r._count.lines,
+      lineTotal,
     }));
   }
 

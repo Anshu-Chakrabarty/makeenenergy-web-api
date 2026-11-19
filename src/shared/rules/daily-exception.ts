@@ -45,9 +45,12 @@ export function detailApplies(
  * Normalise lines for storage (DEX-R6): every line 1–13 present; a line that is not Yes keeps no
  * extra fields; a Yes line keeps only the fields it shows (tank levels follow the tank count).
  */
-export function cleanLines(lines: Partial<ExceptionLines>): ExceptionLines {
+export function cleanLines(
+  lines: Partial<ExceptionLines>,
+  defs: readonly ExceptionLineDef[] = LINES,
+): ExceptionLines {
   const out: ExceptionLines = {};
-  for (const def of LINES) {
+  for (const def of defs) {
     const line = lines[String(def.lineNo)];
     const answer = line?.answer ?? null;
     const details: Record<string, ExceptionDetailValue> = {};
@@ -62,8 +65,11 @@ export function cleanLines(lines: Partial<ExceptionLines>): ExceptionLines {
   return out;
 }
 
-export function allAnswered(lines: ExceptionLines): boolean {
-  return LINES.every((d) => (lines[String(d.lineNo)]?.answer ?? null) !== null);
+export function allAnswered(
+  lines: ExceptionLines,
+  defs: readonly ExceptionLineDef[] = LINES,
+): boolean {
+  return defs.every((d) => (lines[String(d.lineNo)]?.answer ?? null) !== null);
 }
 
 /**
@@ -77,9 +83,10 @@ export function exceptionStatus(
   action: 'draft' | 'submit',
   plantStatus: PlantOperatingStatus | null,
   lines: ExceptionLines,
+  defs: readonly ExceptionLineDef[] = LINES,
 ): ExceptionStatus {
   if (action === 'draft') return 'PARTIAL';
-  const anyYes = LINES.some((d) => lines[String(d.lineNo)]?.answer === 'YES');
+  const anyYes = defs.some((d) => lines[String(d.lineNo)]?.answer === 'YES');
   return anyYes || plantStatus !== 'OPERATIONAL' ? 'PENDING' : 'COMPLETED';
 }
 
@@ -93,32 +100,59 @@ function shown(def: ExceptionDetailDef, v: ExceptionDetailValue): string {
 const cut = (s: string): string =>
   s.length <= HIGHLIGHT_MAX ? s : `${s.slice(0, HIGHLIGHT_MAX - 1)}…`;
 
+/** One problem taken from a filled form. */
+export interface FormException {
+  /** Form field that raised it. `plant_status` when the plant is non-operational. */
+  readonly fieldKey: string;
+  readonly lineNo: number;
+  readonly summary: string;
+}
+
+function lineSummary(def: ExceptionLineDef, line: ExceptionLines[string]): string {
+  const remark = line.details['remarks'];
+  if (def.incident) return cut(`Incident: ${blank(remark) ? '—' : String(remark)}`);
+  if (!blank(remark)) return cut(String(remark));
+  const textDef = def.details.find((d) => d.kind === 'text');
+  const text = textDef ? line.details[textDef.key] : null;
+  if (!blank(text)) return cut(`Line ${String(def.lineNo)} — ${String(text)}`);
+  const parts = def.details
+    .filter((d) => !blank(line.details[d.key]))
+    .map((d) => `${d.label}: ${shown(d, line.details[d.key] ?? null)}`);
+  return cut(`Line ${String(def.lineNo)} — ${parts.length > 0 ? parts.join('; ') : def.question}`);
+}
+
 /**
- * Problem highlight (DEX-R4, D-22): the first Yes line in order 1 → 12 — its remark, or for a
- * line without Remarks a text built from its title and values — else the incident remark, else
- * “Plant non-operational” (D-20). Null when the day is clean or the report is Partial.
+ * Exceptions produced by a submitted form. Each Yes check is one exception. A non-operational
+ * plant with no Yes check is one exception. A draft or a clean day produces none.
+ */
+export function formExceptions(
+  status: ExceptionStatus,
+  plantStatus: PlantOperatingStatus | null,
+  lines: ExceptionLines,
+  defs: readonly ExceptionLineDef[] = LINES,
+): FormException[] {
+  if (status !== 'PENDING') return [];
+  const found: FormException[] = [];
+  for (const def of defs) {
+    const line = lines[String(def.lineNo)];
+    if (line?.answer !== 'YES') continue;
+    found.push({ fieldKey: `l${String(def.lineNo)}`, lineNo: def.lineNo, summary: lineSummary(def, line) });
+  }
+  if (found.length === 0 && plantStatus === 'NON_OPERATIONAL') {
+    found.push({ fieldKey: 'plant_status', lineNo: 0, summary: 'Plant non-operational' });
+  }
+  return found;
+}
+
+/**
+ * Problem highlight (DEX-R4, D-22): the first exception the form produced. Null when the day is
+ * clean or the report is still a draft.
  */
 export function problemHighlight(
   status: ExceptionStatus,
   plantStatus: PlantOperatingStatus | null,
   lines: ExceptionLines,
+  defs: readonly ExceptionLineDef[] = LINES,
 ): string | null {
-  if (status !== 'PENDING') return null;
-  for (const def of LINES) {
-    const line = lines[String(def.lineNo)];
-    if (line?.answer !== 'YES') continue;
-    const remark = line.details['remarks'];
-    if (def.incident) return cut(`Incident: ${blank(remark) ? '—' : String(remark)}`);
-    if (!blank(remark)) return cut(String(remark));
-    const textDef = def.details.find((d) => d.kind === 'text');
-    const text = textDef ? line.details[textDef.key] : null;
-    if (!blank(text)) return cut(`Line ${String(def.lineNo)} — ${String(text)}`);
-    const parts = def.details
-      .filter((d) => !blank(line.details[d.key]))
-      .map((d) => `${d.label}: ${shown(d, line.details[d.key] ?? null)}`);
-    return cut(
-      `Line ${String(def.lineNo)} — ${parts.length > 0 ? parts.join('; ') : def.question}`,
-    );
-  }
-  return plantStatus === 'NON_OPERATIONAL' ? 'Plant non-operational' : null;
+  return formExceptions(status, plantStatus, lines, defs)[0]?.summary ?? null;
 }

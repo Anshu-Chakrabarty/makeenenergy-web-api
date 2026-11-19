@@ -147,7 +147,10 @@ export class InsightsExport {
         rows: v.openExceptions.map((r) => [
           r.plant.name,
           formatDate(r.reportDate),
-          r.problemHighlight ?? `Lines ${String(r.answered + 1)}–13 not yet answered`,
+          r.problemHighlight ??
+            (r.answered >= r.lineTotal
+              ? 'All lines answered'
+              : `Lines ${String(r.answered + 1)}–${String(r.lineTotal)} not yet answered`),
           EXCEPTION_STATUS_TEXT[r.status],
         ]),
       });

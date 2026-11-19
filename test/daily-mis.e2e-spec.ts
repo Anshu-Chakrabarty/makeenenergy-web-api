@@ -465,11 +465,12 @@ describe('downloads (BTN-4, BEV-6 — Phase 6 exit criterion)', () => {
     });
     const t = ws.getRow(totalsRow);
     expect(dataRows).toBe(page.totals.rows);
-    expect(t.getCell(4).value).toBe(Number(page.totals.bottlingDespatches));
-    expect(t.getCell(5).value).toBe(page.totals.cylFilled142);
-    expect(t.getCell(6).value).toBe(page.totals.cylFilled19);
-    expect(t.getCell(7).value).toBe(Number(page.totals.stockGainLoss));
-    expect(t.getCell(8).value).toBe(Number(page.totals.accuracyZeroAverage));
+    expect(t.getCell(5).value).toBe(Number(page.totals.bottlingDespatches));
+    expect(t.getCell(6).value).toBe(page.totals.cylFilled142);
+    expect(t.getCell(7).value).toBe(page.totals.cylFilled19);
+    expect(t.getCell(8).value).toBe(page.totals.cylFilledOther);
+    expect(t.getCell(9).value).toBe(Number(page.totals.stockGainLoss));
+    expect(t.getCell(10).value).toBe(Number(page.totals.accuracyZeroAverage));
     const audit = await db.query(
       `SELECT count(*)::int n FROM audit_log WHERE action = 'EXPORT' AND entity = 'daily_mis'`,
     );

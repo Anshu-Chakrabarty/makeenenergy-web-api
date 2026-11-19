@@ -10,9 +10,12 @@ import {
 } from './index';
 
 describe('Daily MIS field definitions', () => {
-  it('defines fields 1–60 exactly once, in order', () => {
-    expect(DAILY_MIS_FIELDS.map((f) => f.no)).toEqual(Array.from({ length: 60 }, (_, i) => i + 1));
-    expect(new Set(DAILY_MIS_FIELDS.map((f) => f.key)).size).toBe(60);
+  it('defines fields 1–60 exactly once, in order, plus the two old daily counts', () => {
+    const core = DAILY_MIS_FIELDS.filter((f) => f.no <= 60);
+    expect(core.map((f) => f.no)).toEqual(Array.from({ length: 60 }, (_, i) => i + 1));
+    expect(DAILY_MIS_FIELDS.find((f) => f.key === 'carouselsOperated')?.no).toBe(61);
+    expect(DAILY_MIS_FIELDS.find((f) => f.key === 'cylFilledOther')?.no).toBe(62);
+    expect(new Set(DAILY_MIS_FIELDS.map((f) => f.key)).size).toBe(62);
   });
 
   it('marks every system sum and shown field read-only, and none of them are inputs', () => {

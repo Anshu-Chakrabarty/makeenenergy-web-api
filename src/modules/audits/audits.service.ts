@@ -234,6 +234,7 @@ export class AuditsService {
       totalRecommendations: a.totalRecommendations,
       startDate: isoDay(a.startDate),
       endDate: isoDay(a.endDate),
+      legacyFileName: a.legacyFileName,
       files: await this.files.list(tx, 'AUDIT', a.id),
       observations,
       createdBy: personRef(names, a.createdById),

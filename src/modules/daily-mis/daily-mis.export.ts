@@ -37,6 +37,7 @@ export const STATUS_LABEL = {
 const COLUMNS: readonly ReportColumn<DailyMisListRow>[] = [
   { header: 'Plant', width: 22, value: (r) => r.plant.name },
   { header: 'Date', width: 12, value: (r) => formatDate(r.reportDate) },
+  { header: 'Carousels operated', width: 16, decimals: 0, value: (r) => r.carouselsOperated },
   { header: 'Physical stock (MT)', width: 16, decimals: 3, value: (r) => r.physicalStock },
   {
     header: 'Bottling despatches (MT)',
@@ -46,6 +47,12 @@ const COLUMNS: readonly ReportColumn<DailyMisListRow>[] = [
   },
   { header: 'Cyl. filled 14.2 kg', width: 15, decimals: 0, value: (r) => r.cylFilled142 },
   { header: 'Cyl. filled 19 kg', width: 14, decimals: 0, value: (r) => r.cylFilled19 },
+  {
+    header: 'Cyl. filled 5 / 35 / 47.5 / 425 kg',
+    width: 24,
+    decimals: 0,
+    value: (r) => r.cylFilledOther,
+  },
   { header: 'Stock loss / gain (MT)', width: 17, decimals: 3, value: (r) => r.stockGainLoss },
   { header: 'Accuracy (%)', width: 12, decimals: 2, value: (r) => r.accuracyZero },
   { header: 'Status', width: 11, value: (r) => STATUS_LABEL[r.status] },
@@ -93,10 +100,12 @@ export class DailyMisExport {
       totals: [
         `Total (${formatNumber(t.rows, 0)} rows)`,
         null,
+        t.carouselsOperated,
         null,
         t.bottlingDespatches,
         t.cylFilled142,
         t.cylFilled19,
+        t.cylFilledOther,
         t.stockGainLoss,
         t.accuracyZeroAverage,
         null,

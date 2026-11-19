@@ -11,7 +11,6 @@ import {
 } from '../../common/export/report-file';
 import type { RequestContext } from '../../common/security/request-context';
 import {
-  DAILY_EXCEPTION_LINES,
   formatDate,
   formatDateTimeIst,
   formatNumber,
@@ -48,8 +47,6 @@ const COLUMNS: readonly ReportColumn<DailyExceptionListRow>[] = [
     value: (r) => (r.updatedAt ? formatDateTimeIst(new Date(r.updatedAt)) : null),
   },
 ];
-
-const LINES = DAILY_EXCEPTION_LINES as readonly ExceptionLineDef[];
 
 /**
  * Daily Exceptions downloads (BTN-4, BEV-6): the table download reads the SAME filter (including
@@ -112,13 +109,14 @@ export class DailyExceptionsExport {
   /** One report: header, the 13 lines with their extra fields, the files (form “Download PDF”). */
   async record(access: ResolvedAccess, id: string, ctx: RequestContext): Promise<ReportFile> {
     const d = await this.exceptions.get(access, id);
+    const questions = await this.exceptions.form(access);
     const reportId = newReportId();
     const body = await buildRecordPdf({
       reportName: `Daily Exception — ${d.plant.name}, ${formatDate(d.reportDate)}`,
       subtitle: `Status ${EXCEPTION_STATUS_LABEL[d.status]} · entered by ${d.enteredBy.name} · last updated ${formatDateTimeIst(new Date(d.updatedAt))}`,
       reportId,
       generatedAt: new Date(),
-      sections: sectionsOf(d),
+      sections: sectionsOf(d, questions),
     });
     await this.audit.record({
       action: AuditAction.EXPORT,
@@ -137,7 +135,7 @@ export class DailyExceptionsExport {
   }
 }
 
-function sectionsOf(d: DailyExceptionDetail): RecordSection[] {
+function sectionsOf(d: DailyExceptionDetail, questions: readonly ExceptionLineDef[]): RecordSection[] {
   const header: RecordSection = {
     title: 'Header',
     items: [
@@ -157,7 +155,7 @@ function sectionsOf(d: DailyExceptionDetail): RecordSection[] {
       { label: 'Problem highlight', value: d.problemHighlight ?? '—' },
     ],
   };
-  const lines = LINES.map((def) => {
+  const lines = questions.map((def) => {
     const l = d.lines[String(def.lineNo)];
     const answer = l?.answer === 'YES' ? 'Yes' : l?.answer === 'NO' ? 'No' : '—';
     return {

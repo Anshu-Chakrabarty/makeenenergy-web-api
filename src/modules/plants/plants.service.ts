@@ -63,6 +63,13 @@ const plantSelect = {
   extensionYears: true,
   status: true,
   plantKey: true,
+  gstNumber: true,
+  fmCoordinator: true,
+  zonalManager: true,
+  officer1: true,
+  officer2: true,
+  financeOfficer: true,
+  safetyOfficer: true,
   managerId: true,
 } as const satisfies Prisma.PlantSelect;
 type PlantRecord = Prisma.PlantGetPayload<{ select: typeof plantSelect }>;
@@ -102,6 +109,13 @@ export class PlantsService {
       extensionYears: p.extensionYears,
       status: p.status,
       plantKey: p.plantKey,
+      gstNumber: p.gstNumber,
+      fmCoordinator: p.fmCoordinator,
+      zonalManager: p.zonalManager,
+      officer1: p.officer1,
+      officer2: p.officer2,
+      financeOfficer: p.financeOfficer,
+      safetyOfficer: p.safetyOfficer,
       manager: personRef(names, p.managerId) ?? { id: p.managerId, name: '—' },
     };
   }
@@ -205,9 +219,19 @@ export class PlantsService {
     const equipment = Object.fromEntries(
       EQUIPMENT_TYPES.map((e) => {
         const row = p.equipment.find((x) => x.equipment === e);
-        return [e, { quantity: row?.quantity ?? 0, note: row?.note ?? null }];
+        return [
+          e,
+          {
+            quantity: row?.quantity ?? 0,
+            note: row?.note ?? null,
+            serialNumbers: row?.serialNumbers ?? null,
+          },
+        ];
       }),
-    ) as Record<EquipmentType, { quantity: number; note: string | null }>;
+    ) as Record<
+      EquipmentType,
+      { quantity: number; note: string | null; serialNumbers: string | null }
+    >;
     return {
       plant: this.toRow(p, names),
       users: p.assignments
@@ -340,6 +364,13 @@ export class PlantsService {
               startDate: dayOf(input.contractDate),
               endDate: dayOf(plantEndDate(input.contractDate, input.periodYears)),
               status: input.status,
+              gstNumber: input.gstNumber,
+              fmCoordinator: input.fmCoordinator,
+              zonalManager: input.zonalManager,
+              officer1: input.officer1,
+              officer2: input.officer2,
+              financeOfficer: input.financeOfficer,
+              safetyOfficer: input.safetyOfficer,
               createdById: access.userId,
             },
             select: { id: true },
@@ -397,6 +428,13 @@ export class PlantsService {
             startDate: dayOf(input.contractDate),
             endDate: dayOf(plantEndDate(input.contractDate, input.periodYears)),
             status: input.status,
+            gstNumber: input.gstNumber,
+            fmCoordinator: input.fmCoordinator,
+            zonalManager: input.zonalManager,
+            officer1: input.officer1,
+            officer2: input.officer2,
+            financeOfficer: input.financeOfficer,
+            safetyOfficer: input.safetyOfficer,
           },
         });
         await this.seat(tx, access, id, input.managerId, input.userIds);
@@ -496,8 +534,14 @@ export class PlantsService {
         const row = input.equipment[e];
         await tx.plantEquipment.upsert({
           where: { plantId_equipment: { plantId: id, equipment: e } },
-          create: { plantId: id, equipment: e, quantity: row.quantity, note: row.note },
-          update: { quantity: row.quantity, note: row.note },
+          create: {
+            plantId: id,
+            equipment: e,
+            quantity: row.quantity,
+            note: row.note,
+            serialNumbers: row.serialNumbers,
+          },
+          update: { quantity: row.quantity, note: row.note, serialNumbers: row.serialNumbers },
         });
       }
       await this.audit.record(

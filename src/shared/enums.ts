@@ -174,6 +174,10 @@ export const EQUIPMENT_TYPES = [
   'CYLINDER_RETESTING',
   'CCTV_CAMERAS',
   'CHAIN_CONVEYOR',
+  'DIESEL_GENERATOR',
+  'SEALING_MACHINE',
+  'PORTABLE_SEALING_MACHINE',
+  'ONLINE_VALVE',
 ] as const;
 export type EquipmentType = (typeof EQUIPMENT_TYPES)[number];
 
@@ -192,6 +196,10 @@ export const EQUIPMENT_LABELS: Readonly<Record<EquipmentType, string>> = {
   CYLINDER_RETESTING: 'Cylinder re-testing',
   CCTV_CAMERAS: 'CCTV cameras',
   CHAIN_CONVEYOR: 'Chain conveyor',
+  DIESEL_GENERATOR: 'Diesel generator',
+  SEALING_MACHINE: 'Sealing machine',
+  PORTABLE_SEALING_MACHINE: 'Portable sealing machine',
+  ONLINE_VALVE: 'Online valve',
 };
 
 export const KEKA_IMPORT_SOURCES = ['CSV', 'API'] as const;
