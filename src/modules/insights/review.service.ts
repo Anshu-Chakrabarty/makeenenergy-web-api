@@ -119,7 +119,10 @@ export function summaryHighlight(s: CumulativeDailySummary): DailyHighlight {
 }
 
 /** MR-5: the first Yes remark (stored highlight, D-22) or “report not submitted”. */
-export function exceptionText(e: ExceptionRecord | undefined, lineCount = DAILY_EXCEPTION_LINE_COUNT): {
+export function exceptionText(
+  e: ExceptionRecord | undefined,
+  lineCount = DAILY_EXCEPTION_LINE_COUNT,
+): {
   text: string;
   status: ExceptionRowStatus;
   id: string | null;

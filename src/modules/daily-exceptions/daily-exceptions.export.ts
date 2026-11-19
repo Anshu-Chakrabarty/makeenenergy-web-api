@@ -135,7 +135,10 @@ export class DailyExceptionsExport {
   }
 }
 
-function sectionsOf(d: DailyExceptionDetail, questions: readonly ExceptionLineDef[]): RecordSection[] {
+function sectionsOf(
+  d: DailyExceptionDetail,
+  questions: readonly ExceptionLineDef[],
+): RecordSection[] {
   const header: RecordSection = {
     title: 'Header',
     items: [

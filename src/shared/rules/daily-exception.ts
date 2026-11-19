@@ -136,7 +136,11 @@ export function formExceptions(
   for (const def of defs) {
     const line = lines[String(def.lineNo)];
     if (line?.answer !== 'YES') continue;
-    found.push({ fieldKey: `l${String(def.lineNo)}`, lineNo: def.lineNo, summary: lineSummary(def, line) });
+    found.push({
+      fieldKey: `l${String(def.lineNo)}`,
+      lineNo: def.lineNo,
+      summary: lineSummary(def, line),
+    });
   }
   if (found.length === 0 && plantStatus === 'NON_OPERATIONAL') {
     found.push({ fieldKey: 'plant_status', lineNo: 0, summary: 'Plant non-operational' });

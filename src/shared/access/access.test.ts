@@ -36,10 +36,10 @@ describe('go-live defaults (ROLE-D1…D7)', () => {
     expect(m.AUDIT).toBe('SEARCH');
   });
 
-  it('Plant Manager approves MIS but does not type it; submits plant master, audit, licences', () => {
+  it('Plant Manager approves Daily MIS, which includes submit; submits plant master, audit, licences', () => {
     const m = DEFAULT_MODULE_SETTINGS['Plant Manager'];
     expect(m.DAILY_MIS).toBe('APPROVE');
-    expect(settingAllows(m.DAILY_MIS, 'SUBMIT')).toBe(false);
+    expect(settingAllows(m.DAILY_MIS, 'SUBMIT')).toBe(true);
     expect([m.PLANT_MASTER, m.AUDIT, m.LICENCES]).toEqual(['SUBMIT', 'SUBMIT', 'SUBMIT']);
   });
 

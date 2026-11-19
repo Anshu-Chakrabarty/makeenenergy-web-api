@@ -45,7 +45,7 @@ export function recordData(values: DailyMisValues): {
   return { data: { ...data, ...derived }, derived };
 }
 
-/** Every value key present (null when absent) — a save always writes all 48 typed fields. */
+/** Every value key present (null when absent) — a save always writes all 50 typed fields. */
 export function completeValues(partial: Partial<DailyMisValues>): DailyMisValues {
   const out = {} as Record<DailyMisValueKey, string | number | null>;
   for (const f of FIELDS) out[f.key] = partial[f.key] ?? null;

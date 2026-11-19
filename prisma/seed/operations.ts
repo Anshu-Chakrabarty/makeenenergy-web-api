@@ -29,6 +29,10 @@ const YEDIYUR_EQUIPMENT: Record<EquipmentType, [number, string | null]> = {
   CYLINDER_RETESTING: [1, null],
   CCTV_CAMERAS: [32, null],
   CHAIN_CONVEYOR: [2, 'Carousel line A / B'],
+  DIESEL_GENERATOR: [2, null],
+  SEALING_MACHINE: [1, null],
+  PORTABLE_SEALING_MACHINE: [1, null],
+  ONLINE_VALVE: [4, null],
 };
 
 export async function seedPlantDetails(
