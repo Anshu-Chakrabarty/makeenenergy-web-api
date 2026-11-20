@@ -132,7 +132,7 @@ export class DailyMisExport {
     };
   }
 
-  /** One report, all 60 fields (form “Download PDF”). */
+  /** One report, all 62 fields (form “Download PDF”). */
   async record(access: ResolvedAccess, id: string, ctx: RequestContext): Promise<ReportFile> {
     const d = await this.daily.get(access, id);
     const reportId = newReportId();

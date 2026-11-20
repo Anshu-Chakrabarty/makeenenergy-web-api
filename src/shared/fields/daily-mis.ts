@@ -21,7 +21,7 @@ const MT = { unit: 'MT' } as const;
 const MIN = { unit: 'min' } as const;
 const PCT = { unit: '%' } as const;
 
-/** The 60 numbered Daily MIS fields, defined once (spec field numbers). */
+/** The 62 Daily MIS fields, defined once. Spec numbers 1–60 stay; 61 and 62 are the added ones. */
 export const DAILY_MIS_FIELDS = [
   field(1, 'plantId', 'Plant name', S.header, 'plant', { required: true }),
   field(2, 'reportDate', 'Date', S.header, 'date', { required: true }),
