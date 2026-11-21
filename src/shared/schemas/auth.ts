@@ -26,7 +26,7 @@ export const AUTH_MESSAGES = {
   confirmMismatch: 'Passwords do not match.',
   passwordCommon: 'This password is too common. Choose another.',
   passwordHasEmail: 'The password must not contain your email name.',
-  otpWait: 'Please wait a minute before requesting another OTP.',
+  otpWait: 'Please wait 30 seconds before requesting another OTP.',
   otpHourly: 'Too many OTP requests. Try again in an hour.',
   tooManyAttempts: 'Too many attempts. Please wait and try again.',
 } as const;
