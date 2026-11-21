@@ -87,6 +87,10 @@ enum EquipmentType {
   CYLINDER_RETESTING
   CCTV_CAMERAS
   CHAIN_CONVEYOR
+  DIESEL_GENERATOR
+  SEALING_MACHINE
+  PORTABLE_SEALING_MACHINE
+  ONLINE_VALVE
 }
 
 enum ReportStatus {
@@ -406,6 +410,14 @@ model Plant {
   /// = contract date + period − 1 day (CHECK, D-15).
   endDate            DateTime    @map("end_date") @db.Date
   status             PlantStatus @default(NEW)
+  /// GSTIN from the old plant record. Empty when the old row had none.
+  gstNumber          String?     @map("gst_number") @db.VarChar(20)
+  fmCoordinator      String?     @map("fm_coordinator") @db.VarChar(160)
+  zonalManager       String?     @map("zonal_manager") @db.VarChar(160)
+  officer1           String?     @map("officer_1") @db.VarChar(160)
+  officer2           String?     @map("officer_2") @db.VarChar(160)
+  financeOfficer     String?     @map("finance_officer") @db.VarChar(160)
+  safetyOfficer      String?     @map("safety_officer") @db.VarChar(160)
   readFileIntoFields Boolean     @default(false) @map("read_file_into_fields")
   createdById        String?     @map("created_by_id") @db.Uuid
   createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -470,9 +482,11 @@ model PlantDetail {
 /// Plant details fields 5–18: one row per equipment type.
 model PlantEquipment {
   plantId   String        @map("plant_id") @db.Uuid
-  equipment EquipmentType
-  quantity  Int           @default(0)
-  note      String?       @db.VarChar(300)
+  equipment     EquipmentType
+  quantity      Int           @default(0)
+  note          String?       @db.VarChar(300)
+  /// Serial numbers for this equipment type, separated by commas.
+  serialNumbers String?       @map("serial_numbers") @db.VarChar(300)
 
   plant Plant @relation(fields: [plantId], references: [id], onDelete: Cascade)
 
@@ -520,6 +534,8 @@ model DailyMis {
   status                 ReportStatus @default(DRAFT)
   shiftsOperated         Int?         @map("shifts_operated") @db.SmallInt
   otHours                Decimal?     @map("ot_hours") @db.Decimal(6, 2)
+  /// How many carousels ran that day (0–3). Old daily field, separate from carousel downtime.
+  carouselsOperated      Int?         @map("carousels_operated") @db.SmallInt
   enteredById            String       @map("entered_by_id") @db.Uuid
   // 9–20 stock, receipt, despatch, filling (MT unless count)
   openingStock           Decimal?     @map("opening_stock") @db.Decimal(14, 3)
@@ -530,6 +546,8 @@ model DailyMis {
   otTtLoading            Decimal?     @map("ot_tt_loading") @db.Decimal(14, 3)
   cylFilled142           Int?         @map("cyl_filled_14_2")
   cylFilled19            Int?         @map("cyl_filled_19")
+  /// Combined count of 5 kg, 35 kg, 47.5 kg and 425 kg cylinders (old daily field).
+  cylFilledOther         Int?         @map("cyl_filled_other")
   prcnReturn             Decimal?     @map("prcn_return") @db.Decimal(14, 3)
   closingBookStock       Decimal?     @map("closing_book_stock") @db.Decimal(14, 3)
   physicalStock          Decimal?     @map("physical_stock") @db.Decimal(14, 3)
@@ -743,6 +761,8 @@ model DailyException {
   status             ExceptionStatus       @default(PARTIAL)
   /// First Yes-line remark or the incident remark (derived on save, D-22).
   problemHighlight   String?               @map("problem_highlight") @db.VarChar(500)
+  /// Old SQC report file name. The export did not include the file itself.
+  legacyFileName     String?               @map("legacy_file_name") @db.VarChar(255)
   readFileIntoFields Boolean               @default(false) @map("read_file_into_fields")
   enteredById        String                @map("entered_by_id") @db.Uuid
   lastModifiedById   String?               @map("last_modified_by_id") @db.Uuid
@@ -750,15 +770,69 @@ model DailyException {
   createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  plant Plant                @relation(fields: [plantId], references: [id])
-  lines DailyExceptionLine[]
+  plant      Plant                @relation(fields: [plantId], references: [id])
+  lines      DailyExceptionLine[]
+  exceptions FormException[]
 
   @@unique([plantId, reportDate])
   @@index([status, reportDate])
   @@map("daily_exceptions")
 }
 
-/// Lines 1–13. `details` holds the extra fields a Yes opens, validated by a per-line Zod schema.
+/// The Daily Exception form. Checks and their extra inputs are fields of this form.
+model ExceptionForm {
+  id     Int     @id @default(autoincrement())
+  code   String  @unique @db.VarChar(40)
+  name   String  @db.VarChar(120)
+  active Boolean @default(true)
+
+  fields ExceptionFormField[]
+
+  @@map("exception_forms")
+}
+
+/// One input on the form. A Yes on a check (`raises_exception`) becomes an exception.
+model ExceptionFormField {
+  id              Int     @id @default(autoincrement())
+  formId          Int     @map("form_id")
+  /// Answer group. Child inputs share the check's line number.
+  lineNo          Int     @map("line_no") @db.SmallInt
+  /// Spec field number shown on the form.
+  fieldNo         Int     @map("field_no") @db.SmallInt
+  fieldKey        String  @map("field_key") @db.VarChar(40)
+  /// Key stored inside the line's details. Empty on the Yes / No check itself.
+  valueKey        String? @map("value_key") @db.VarChar(40)
+  label           String  @db.VarChar(500)
+  kind            String  @db.VarChar(16)
+  parentKey       String? @map("parent_key") @db.VarChar(40)
+  raisesException Boolean @default(false) @map("raises_exception")
+  incident        Boolean @default(false)
+  unit            String? @db.VarChar(40)
+  decimals        Int?    @db.SmallInt
+  options         Json?
+  minTanks        Int?    @map("min_tanks") @db.SmallInt
+  sortOrder       Int     @map("sort_order")
+
+  form ExceptionForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, fieldKey])
+  @@map("exception_form_fields")
+}
+
+/// A problem taken from a filled form. Replaced whenever that form is saved.
+model FormException {
+  dailyExceptionId String @map("daily_exception_id") @db.Uuid
+  fieldKey         String @map("field_key") @db.VarChar(40)
+  lineNo           Int    @map("line_no") @db.SmallInt
+  summary          String @db.VarChar(500)
+
+  report DailyException @relation(fields: [dailyExceptionId], references: [id], onDelete: Cascade)
+
+  @@id([dailyExceptionId, fieldKey])
+  @@map("form_exceptions")
+}
+
+/// Saved answers for one check on the form. `details` holds that check's extra inputs.
 model DailyExceptionLine {
   exceptionId String @map("exception_id") @db.Uuid
   lineNo      Int    @map("line_no") @db.SmallInt
@@ -795,6 +869,8 @@ model Audit {
   /// Indian FY label, e.g. 2026-27.
   fy                   String         @db.Char(7)
   totalRecommendations Int            @map("total_recommendations")
+  /// Old audit upload name. The export did not include the file itself.
+  legacyFileName       String?        @map("legacy_file_name") @db.VarChar(255)
   startDate            DateTime       @map("start_date") @db.Date
   endDate              DateTime       @map("end_date") @db.Date
   readFileIntoFields   Boolean        @default(false) @map("read_file_into_fields")

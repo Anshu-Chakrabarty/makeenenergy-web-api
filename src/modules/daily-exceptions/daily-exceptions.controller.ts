@@ -25,12 +25,13 @@ import { IdParamDto } from '../../common/pipes/params';
 import { requestContext } from '../../common/security/request-context';
 import {
   DAILY_EXCEPTION_MESSAGES,
+  dailyExceptionBodySchema,
   dailyExceptionExportSchema,
   dailyExceptionQuerySchema,
-  dailyExceptionSaveSchema,
   lapseNoteSchema,
   type DailyExceptionDetail,
   type DailyExceptionPage,
+  type ExceptionLineDef,
 } from '../../shared';
 import type { ResolvedAccess } from '../access/access.service';
 import type { IncomingFile } from '../attachments/attachments.service';
@@ -40,7 +41,7 @@ import { DailyExceptionsService } from './daily-exceptions.service';
 
 class QueryDto extends createZodDto(dailyExceptionQuerySchema) {}
 class ExportDto extends createZodDto(dailyExceptionExportSchema) {}
-class SaveDto extends createZodDto(dailyExceptionSaveSchema) {}
+class SaveDto extends createZodDto(dailyExceptionBodySchema) {}
 class LapseNoteDto extends createZodDto(lapseNoteSchema) {}
 class FileParamDto extends createZodDto(z.object({ id: z.uuid(), fileId: z.uuid() })) {}
 
@@ -89,6 +90,12 @@ export class DailyExceptionsController {
     @Req() req: Request,
   ): Promise<DailyExceptionDetail> {
     return this.exceptions.create(access, body, requestContext(req));
+  }
+
+  @RequireModule('DAILY_EXCEPTIONS', 'VIEW')
+  @Get('form')
+  form(@CurrentAccess() access: ResolvedAccess): Promise<ExceptionLineDef[]> {
+    return this.exceptions.form(access);
   }
 
   @RequireModule('DAILY_EXCEPTIONS', 'VIEW')

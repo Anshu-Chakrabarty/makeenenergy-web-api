@@ -119,7 +119,10 @@ export function summaryHighlight(s: CumulativeDailySummary): DailyHighlight {
 }
 
 /** MR-5: the first Yes remark (stored highlight, D-22) or “report not submitted”. */
-export function exceptionText(e: ExceptionRecord | undefined): {
+export function exceptionText(
+  e: ExceptionRecord | undefined,
+  lineCount = DAILY_EXCEPTION_LINE_COUNT,
+): {
   text: string;
   status: ExceptionRowStatus;
   id: string | null;
@@ -131,7 +134,7 @@ export function exceptionText(e: ExceptionRecord | undefined): {
     return {
       text:
         e.problemHighlight ??
-        `Partial — ${String(e.lines.length)} of ${String(DAILY_EXCEPTION_LINE_COUNT)} lines answered`,
+        `Partial — ${String(e.lines.length)} of ${String(lineCount)} lines answered`,
       status: 'PARTIAL',
       id: e.id,
     };
@@ -212,6 +215,9 @@ export class ReviewService {
     const monthEnd = q.month ? lastDayOfMonth(q.month) : from;
     const to = monthEnd < today ? monthEnd : today;
     return this.asActor(access, async (tx) => {
+      const lineCount = await tx.exceptionFormField.count({
+        where: { kind: 'yes_no', form: { code: 'DAILY', active: true } },
+      });
       const plants = await this.plants(tx, scope, to);
       const ids = plants.map((p) => p.id);
       const range = { gte: dayOf(from), lte: dayOf(to) };
@@ -237,7 +243,7 @@ export class ReviewService {
             plant: p,
             status: d?.status ?? null,
             daily: d ? dailyHighlight(d) : null,
-            exception: exceptionText(exOf.get(p.id)),
+            exception: exceptionText(exOf.get(p.id), lineCount),
             lapse: lapseOf(p.id),
             monthly: null,
           };
@@ -245,7 +251,7 @@ export class ReviewService {
         filed = daily.length;
       } else {
         const month = q.month ?? monthOf(from);
-        rows = await this.monthRows(tx, plants, month, from, to, exceptions, lapseOf);
+        rows = await this.monthRows(tx, plants, month, from, to, exceptions, lapseOf, lineCount);
         filed = rows.filter((r) => r.status !== null).length;
       }
 
@@ -311,6 +317,7 @@ export class ReviewService {
     to: string,
     exceptions: ExceptionRecord[],
     lapseOf: (plantId: string) => ReviewPackRow['lapse'],
+    lineCount: number,
   ): Promise<ReviewPackRow[]> {
     const ids = plants.map((p) => p.id);
     const [monthly, approved] = await Promise.all([
@@ -351,7 +358,7 @@ export class ReviewService {
       const open = exceptions.find((e) => e.plantId === p.id && e.status !== 'COMPLETED');
       const lapse = lapseOf(p.id);
       const exception = open
-        ? exceptionText(open)
+        ? exceptionText(open, lineCount)
         : lapse.month > 0
           ? {
               text: `${EXCEPTION_TEXT.notSubmitted} on ${String(lapse.month)} day${lapse.month === 1 ? '' : 's'}`,

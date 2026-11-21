@@ -41,7 +41,7 @@ export const DAILY_EXCEPTION_MESSAGES = {
 /** Text detail fields (remarks, observation): at most 500 characters (the highlight width). */
 export const EXCEPTION_TEXT_MAX = 500;
 
-const LINES = DAILY_EXCEPTION_LINES as readonly ExceptionLineDef[];
+const SEEDED_LINES = DAILY_EXCEPTION_LINES as readonly ExceptionLineDef[];
 
 function detailSchema(def: ExceptionDetailDef) {
   switch (def.kind) {
@@ -65,67 +65,84 @@ export function exceptionLineSchema(def: ExceptionLineDef) {
   });
 }
 
-const linesShape = Object.fromEntries(
-  LINES.map((def) => [
-    String(def.lineNo),
-    exceptionLineSchema(def).default({ answer: null, details: {} }),
-  ]),
-);
-
-export const exceptionLinesSchema = z.object(linesShape);
-
-/**
- * Save draft / Submit (DEX-R2, R3, R5). A Draft may be incomplete. Submit needs the plant status
- * and all 13 answers; a Yes needs its Remarks (or, on lines 3, 4, 5, 7, 9, 11, 12, its extra
- * fields); an incident needs its description (UXV-9).
- */
-export const dailyExceptionSaveSchema = z
-  .object({
-    action: z.enum(['draft', 'submit']),
-    version: z.number().int().min(1).optional(),
-    plantId: z.uuid({ error: FIELD_MESSAGES.plantRequired }),
-    reportDate: pastIsoDate(),
-    plantStatus: z.enum(PLANT_OPERATING_STATUSES).nullable().optional(),
-    lines: exceptionLinesSchema.default({} as never),
-  })
-  .superRefine((v, ctx) => {
-    if (v.action !== 'submit') return;
-    if (!v.plantStatus) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['plantStatus'],
-        message: DAILY_EXCEPTION_MESSAGES.plantStatusRequired,
-      });
-    }
-    for (const def of LINES) {
-      const key = String(def.lineNo);
-      const line = v.lines[key];
-      if (!line?.answer) {
+/** Save rules for one checklist. The live API builds this from `exception_questions`. */
+export function exceptionSaveSchema(defs: readonly ExceptionLineDef[]) {
+  const linesShape = Object.fromEntries(
+    defs.map((def) => [
+      String(def.lineNo),
+      exceptionLineSchema(def).default({ answer: null, details: {} }),
+    ]),
+  );
+  return z
+    .object({
+      action: z.enum(['draft', 'submit']),
+      version: z.number().int().min(1).optional(),
+      plantId: z.uuid({ error: FIELD_MESSAGES.plantRequired }),
+      reportDate: pastIsoDate(),
+      plantStatus: z.enum(PLANT_OPERATING_STATUSES).nullable().optional(),
+      lines: z.object(linesShape).default({} as never),
+    })
+    .superRefine((v, ctx) => {
+      if (v.action !== 'submit') return;
+      if (!v.plantStatus) {
         ctx.addIssue({
           code: 'custom',
-          path: ['lines', key, 'answer'],
-          message: DAILY_EXCEPTION_MESSAGES.answerRequired,
-        });
-        continue;
-      }
-      if (line.answer !== 'YES') continue;
-      for (const d of def.details) {
-        if (!detailApplies(d, line.details)) continue;
-        const val = line.details[d.key];
-        if (val !== null && val !== undefined && val !== '') continue;
-        ctx.addIssue({
-          code: 'custom',
-          path: ['lines', key, 'details', d.key],
-          message: def.incident
-            ? DAILY_EXCEPTION_MESSAGES.incidentRequired
-            : d.key === 'remarks'
-              ? DAILY_EXCEPTION_MESSAGES.remarksRequired
-              : DAILY_EXCEPTION_MESSAGES.detailRequired,
+          path: ['plantStatus'],
+          message: DAILY_EXCEPTION_MESSAGES.plantStatusRequired,
         });
       }
-    }
-  });
+      for (const def of defs) {
+        const key = String(def.lineNo);
+        const line = v.lines[key];
+        if (!line?.answer) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['lines', key, 'answer'],
+            message: DAILY_EXCEPTION_MESSAGES.answerRequired,
+          });
+          continue;
+        }
+        if (line.answer !== 'YES') continue;
+        for (const d of def.details) {
+          if (!detailApplies(d, line.details)) continue;
+          const val = line.details[d.key];
+          if (val !== null && val !== undefined && val !== '') continue;
+          ctx.addIssue({
+            code: 'custom',
+            path: ['lines', key, 'details', d.key],
+            message: def.incident
+              ? DAILY_EXCEPTION_MESSAGES.incidentRequired
+              : d.key === 'remarks'
+                ? DAILY_EXCEPTION_MESSAGES.remarksRequired
+                : DAILY_EXCEPTION_MESSAGES.detailRequired,
+          });
+        }
+      }
+    });
+}
+
+/** The seeded checklist. Tests use this. The running form uses the database rows. */
+export const dailyExceptionSaveSchema = exceptionSaveSchema(SEEDED_LINES);
 export type DailyExceptionSaveInput = z.infer<typeof dailyExceptionSaveSchema>;
+
+/** Request body before the checklist in the database is applied. */
+export const dailyExceptionBodySchema = z.object({
+  action: z.enum(['draft', 'submit']),
+  version: z.number().int().min(1).optional(),
+  plantId: z.uuid({ error: FIELD_MESSAGES.plantRequired }),
+  reportDate: pastIsoDate(),
+  plantStatus: z.enum(PLANT_OPERATING_STATUSES).nullable().optional(),
+  lines: z
+    .record(
+      z.string(),
+      z.object({
+        answer: z.enum(YES_NO).nullable().optional(),
+        details: z.record(z.string(), z.union([z.string(), z.number(), z.null()])).optional(),
+      }),
+    )
+    .default({}),
+});
+export type DailyExceptionBody = z.infer<typeof dailyExceptionBodySchema>;
 
 /** Table status filter: the stored statuses plus the derived Not initiated (DEX-S4). */
 export const EXCEPTION_ROW_STATUSES = [...EXCEPTION_STATUSES, 'NOT_INITIATED'] as const;

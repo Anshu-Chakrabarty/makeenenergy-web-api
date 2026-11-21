@@ -221,6 +221,10 @@ export interface DailyMisListRow {
   cylFilled142: number | null;
   /** F16 */
   cylFilled19: number | null;
+  /** F62. Combined 5 kg, 35 kg, 47.5 kg and 425 kg count. */
+  cylFilledOther: number | null;
+  /** F61 */
+  carouselsOperated: number | null;
   /** F20 */
   stockGainLoss: string | null;
   /** F39 */
@@ -240,6 +244,8 @@ export interface DailyMisTotals {
   bottlingDespatches: string;
   cylFilled142: number;
   cylFilled19: number;
+  cylFilledOther: number;
+  carouselsOperated: number;
   stockGainLoss: string;
   /** Average of F39 over rows that have it; null when none. */
   accuracyZeroAverage: string | null;
@@ -474,6 +480,8 @@ export interface DailyExceptionDetail {
   plantStatus: PlantOperatingStatus | null;
   status: ExceptionStatus;
   problemHighlight: string | null;
+  /** Old SQC report file name. The file itself was not in the export. */
+  legacyFileName: string | null;
   lines: ExceptionLines;
   attachments: AttachmentRef[];
   enteredBy: PersonRef;
@@ -505,6 +513,13 @@ export interface PlantRow {
   extensionYears: number | null;
   status: PlantStatus;
   plantKey: string;
+  gstNumber: string | null;
+  fmCoordinator: string | null;
+  zonalManager: string | null;
+  officer1: string | null;
+  officer2: string | null;
+  financeOfficer: string | null;
+  safetyOfficer: string | null;
   manager: PersonRef;
 }
 
@@ -542,7 +557,10 @@ export interface PlantDetailView {
     capacity: string | null;
     production: string | null;
     volumes: PlantVolume[];
-    equipment: Record<EquipmentType, { quantity: number; note: string | null }>;
+    equipment: Record<
+      EquipmentType,
+      { quantity: number; note: string | null; serialNumbers: string | null }
+    >;
     updatedBy: PersonRef | null;
     updatedAt: string | null;
   };
@@ -610,6 +628,8 @@ export interface AuditDetail {
   totalRecommendations: number;
   startDate: string;
   endDate: string;
+  /** Old audit upload name. The file itself was not in the export. */
+  legacyFileName: string | null;
   files: AttachmentRef[];
   observations: ObservationView[];
   createdBy: PersonRef | null;
@@ -792,6 +812,8 @@ export interface DashboardExceptionRow {
   status: 'PENDING' | 'PARTIAL';
   /** Lines answered so far (a Partial row's highlight says which are left). */
   answered: number;
+  /** Active questions in the checklist. */
+  lineTotal: number;
 }
 
 export interface DashboardView {

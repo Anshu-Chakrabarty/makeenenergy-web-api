@@ -12,10 +12,11 @@ import type { RequestContext } from '../../common/security/request-context';
 import { Prisma } from '../../generated/prisma/client';
 import {
   DAILY_EXCEPTION_MESSAGES,
-  DAILY_EXCEPTION_LINE_COUNT,
   addDays,
   cleanLines,
+  exceptionSaveSchema,
   exceptionStatus,
+  formExceptions,
   financialYearOf,
   financialYearRange,
   firstDayOfMonth,
@@ -23,7 +24,7 @@ import {
   formatMonthYear,
   istToday,
   monthOf,
-  problemHighlight,
+  type DailyExceptionBody,
   type DailyExceptionCards,
   type DailyExceptionDetail,
   type DailyExceptionFilter,
@@ -31,7 +32,10 @@ import {
   type DailyExceptionPage,
   type DailyExceptionQuery,
   type DailyExceptionSaveInput,
+  type ExceptionDetailDef,
   type ExceptionDetailValue,
+  type ExceptionLineDef,
+  type FormException,
   type ExceptionLines,
   type ExceptionRowStatus,
   type ExceptionStatus,
@@ -354,10 +358,11 @@ export class DailyExceptionsService {
     const names = await this.names(tx, [r.enteredById, r.lastModifiedById]);
     const ref = (userId: string | null): PersonRef | null =>
       userId === null ? null : { id: userId, name: names.get(userId) ?? '—' };
+    const defs = await this.catalog(tx);
     const lines: ExceptionLines = {};
-    for (let n = 1; n <= DAILY_EXCEPTION_LINE_COUNT; n += 1) {
-      const l = r.lines.find((x) => x.lineNo === n);
-      lines[String(n)] = {
+    for (const def of defs) {
+      const l = r.lines.find((x) => x.lineNo === def.lineNo);
+      lines[String(def.lineNo)] = {
         answer: l?.answer ?? null,
         details:
           l && l.details !== null && typeof l.details === 'object' && !Array.isArray(l.details)
@@ -374,6 +379,7 @@ export class DailyExceptionsService {
       plantStatus: r.plantStatus,
       status: r.status,
       problemHighlight: r.problemHighlight,
+      legacyFileName: r.legacyFileName,
       lines,
       attachments: await this.files.list(tx, 'DAILY_EXCEPTION', r.id),
       enteredBy: ref(r.enteredById) ?? { id: r.enteredById, name: '—' },
@@ -396,12 +402,94 @@ export class DailyExceptionsService {
     if (!p) throw forbidden('You do not have access to this plant.');
   }
 
-  /** Status, highlight and the 13 clean lines, from the shared rules (never from the client). */
-  private compute(input: DailyExceptionSaveInput) {
-    const lines = cleanLines(input.lines);
+  /** The Daily Exception form. Checks are fields; a Yes on a check raises an exception. */
+  async form(access: ResolvedAccess): Promise<ExceptionLineDef[]> {
+    return this.asActor(access, (tx) => this.catalog(tx));
+  }
+
+  private async catalog(tx: Tx): Promise<ExceptionLineDef[]> {
+    const fields = await tx.exceptionFormField.findMany({
+      where: { form: { code: 'DAILY', active: true } },
+      orderBy: { sortOrder: 'asc' },
+    });
+    const checks = fields.filter((f) => f.kind === 'yes_no');
+    if (checks.length === 0) {
+      throw new AppError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        ErrorCode.SERVICE_UNAVAILABLE,
+        'The daily exception form is not set up.',
+      );
+    }
+    return checks.map((check) => ({
+      lineNo: check.lineNo,
+      answerNo: check.fieldNo,
+      question: check.label,
+      ...(check.incident ? { incident: true as const } : {}),
+      details: fields
+        .filter((f) => f.parentKey === check.fieldKey)
+        .map((f): ExceptionDetailDef => {
+          const options = Array.isArray(f.options)
+            ? f.options.filter((o): o is string => typeof o === 'string')
+            : undefined;
+          return {
+            no: f.fieldNo,
+            key: f.valueKey ?? f.fieldKey,
+            label: f.label,
+            kind: f.kind as ExceptionDetailDef['kind'],
+            ...(f.unit ? { unit: f.unit } : {}),
+            ...(f.decimals !== null ? { decimals: f.decimals } : {}),
+            ...(options && options.length > 0 ? { options } : {}),
+            ...(f.minTanks !== null ? { minTanks: f.minTanks } : {}),
+          };
+        }),
+    }));
+  }
+
+  /** Apply the database checklist, then derive status and the highlight. */
+  private async prepare(tx: Tx, raw: DailyExceptionBody) {
+    const defs = await this.catalog(tx);
+    const parsed = exceptionSaveSchema(defs).safeParse(raw);
+    if (!parsed.success) {
+      throw new AppError(
+        HttpStatus.BAD_REQUEST,
+        ErrorCode.VALIDATION_FAILED,
+        'Some fields are not valid.',
+        parsed.error.issues.map((i) => ({
+          path: i.path.map(String).join('.'),
+          message: i.message,
+        })),
+      );
+    }
+    return { input: parsed.data, computed: this.compute(parsed.data, defs) };
+  }
+
+  /** Status, highlight and the clean lines, from the shared rules (never from the client). */
+  private compute(input: DailyExceptionSaveInput, defs: readonly ExceptionLineDef[]) {
+    const lines = cleanLines(input.lines, defs);
     const plantStatus = input.plantStatus ?? null;
-    const status = exceptionStatus(input.action, plantStatus, lines);
-    return { lines, plantStatus, status, highlight: problemHighlight(status, plantStatus, lines) };
+    const status = exceptionStatus(input.action, plantStatus, lines, defs);
+    const raised = formExceptions(status, plantStatus, lines, defs);
+    return {
+      lines,
+      plantStatus,
+      status,
+      highlight: raised[0]?.summary ?? null,
+      raised,
+    };
+  }
+
+  /** Replace the exceptions this form produced. A draft or a clean day leaves none. */
+  private async writeRaised(tx: Tx, id: string, raised: readonly FormException[]): Promise<void> {
+    await tx.formException.deleteMany({ where: { dailyExceptionId: id } });
+    if (raised.length === 0) return;
+    await tx.formException.createMany({
+      data: raised.map((r) => ({
+        dailyExceptionId: id,
+        fieldKey: r.fieldKey,
+        lineNo: r.lineNo,
+        summary: r.summary,
+      })),
+    });
   }
 
   private async writeLines(tx: Tx, id: string, lines: ExceptionLines): Promise<void> {
@@ -425,13 +513,13 @@ export class DailyExceptionsService {
   /** Save draft → Partial (DEX-R2); Submit → Completed / Pending (DEX-R3). One per plant + date. */
   async create(
     access: ResolvedAccess,
-    input: DailyExceptionSaveInput,
+    raw: DailyExceptionBody,
     ctx: RequestContext,
   ): Promise<DailyExceptionDetail> {
-    assertPlant(access, input.plantId, NEED.submit);
-    const c = this.compute(input);
+    assertPlant(access, raw.plantId, NEED.submit);
     try {
       return await this.asActor(access, async (tx) => {
+        const { input, computed: c } = await this.prepare(tx, raw);
         await this.plantExists(tx, input.plantId);
         const exists = await tx.dailyException.count({
           where: { plantId: input.plantId, reportDate: dateOf(input.reportDate) },
@@ -450,6 +538,7 @@ export class DailyExceptionsService {
           select: { id: true, plantId: true },
         });
         await this.writeLines(tx, row.id, c.lines);
+        await this.writeRaised(tx, row.id, c.raised);
         // A missed-day note no longer applies once the day has a report.
         await tx.lapseNote.deleteMany({
           where: { plantId: input.plantId, date: dateOf(input.reportDate) },
@@ -502,12 +591,12 @@ export class DailyExceptionsService {
   async update(
     access: ResolvedAccess,
     id: string,
-    input: DailyExceptionSaveInput,
+    raw: DailyExceptionBody,
     ctx: RequestContext,
   ): Promise<DailyExceptionDetail> {
-    const c = this.compute(input);
     try {
       return await this.asActor(access, async (tx) => {
+        const { input, computed: c } = await this.prepare(tx, raw);
         const row = await this.lock(tx, id);
         assertPlant(access, row.plantId, NEED.submit);
         if (input.version === undefined || row.version !== input.version)
@@ -538,6 +627,7 @@ export class DailyExceptionsService {
           select: { plantId: true, version: true },
         });
         await this.writeLines(tx, id, c.lines);
+        await this.writeRaised(tx, id, c.raised);
         await this.audit.record(
           {
             action: input.action === 'submit' ? AuditAction.SUBMIT : AuditAction.UPDATE,

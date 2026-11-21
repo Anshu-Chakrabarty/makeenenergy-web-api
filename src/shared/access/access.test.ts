@@ -8,13 +8,14 @@ import {
   settingAllows,
 } from './index';
 
-describe('module settings are bundles, not a ladder (D-10)', () => {
-  it('Approve gives view, download and approve — but not submit', () => {
-    expect(capabilitiesOf('APPROVE')).toEqual(['VIEW', 'DOWNLOAD', 'APPROVE']);
-    expect(settingAllows('APPROVE', 'SUBMIT')).toBe(false);
+describe('module settings stack read, write, then approve', () => {
+  it('Approve gives view, download, submit and approve', () => {
+    expect(capabilitiesOf('APPROVE')).toEqual(['VIEW', 'DOWNLOAD', 'SUBMIT', 'APPROVE']);
+    expect(settingAllows('APPROVE', 'SUBMIT')).toBe(true);
   });
-  it('Submit does not give download; Hidden gives nothing', () => {
-    expect(settingAllows('SUBMIT', 'DOWNLOAD')).toBe(false);
+  it('Submit includes download; Hidden gives nothing', () => {
+    expect(settingAllows('SUBMIT', 'DOWNLOAD')).toBe(true);
+    expect(capabilitiesOf('SUBMIT')).toEqual(['VIEW', 'DOWNLOAD', 'SUBMIT']);
     expect(capabilitiesOf('HIDDEN')).toEqual([]);
   });
 });
@@ -35,10 +36,10 @@ describe('go-live defaults (ROLE-D1…D7)', () => {
     expect(m.AUDIT).toBe('SEARCH');
   });
 
-  it('Plant Manager approves MIS but does not type it; submits plant master, audit, licences', () => {
+  it('Plant Manager approves Daily MIS, which includes submit; submits plant master, audit, licences', () => {
     const m = DEFAULT_MODULE_SETTINGS['Plant Manager'];
     expect(m.DAILY_MIS).toBe('APPROVE');
-    expect(settingAllows(m.DAILY_MIS, 'SUBMIT')).toBe(false);
+    expect(settingAllows(m.DAILY_MIS, 'SUBMIT')).toBe(true);
     expect([m.PLANT_MASTER, m.AUDIT, m.LICENCES]).toEqual(['SUBMIT', 'SUBMIT', 'SUBMIT']);
   });
 

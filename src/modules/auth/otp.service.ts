@@ -72,8 +72,8 @@ export class OtpService {
         [{ path: 'channel', message: AUTH_MESSAGES.channelRequired }],
       );
     }
-    // SEC-6: 1 per 60 s and 5 per hour per person.
-    const perMinute = await this.limiter.hit(`otp:send:min:${user.id}`, 1, 60_000);
+    // SEC-6: 1 per 30 s and 5 per hour per person.
+    const perMinute = await this.limiter.hit(`otp:send:min:${user.id}`, 1, 30_000);
     if (!perMinute.allowed) throw tooMany(AUTH_MESSAGES.otpWait, perMinute.retryAfterMs);
     const perHour = await this.limiter.hit(`otp:send:hour:${user.id}`, 5, 3_600_000);
     if (!perHour.allowed) throw tooMany(AUTH_MESSAGES.otpHourly, perHour.retryAfterMs);

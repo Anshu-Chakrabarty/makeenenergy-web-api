@@ -23,8 +23,8 @@ function issues(r: {
 }
 
 describe('Daily MIS value fields', () => {
-  it('are the 48 typed fields: 60 minus plant, date, 4 shown and 6 system sums', () => {
-    expect(DAILY_MIS_VALUE_FIELDS).toHaveLength(48);
+  it('are the 50 typed fields: 62 minus plant, date, 4 shown and 6 system sums', () => {
+    expect(DAILY_MIS_VALUE_FIELDS).toHaveLength(50);
     expect(DAILY_MIS_VALUE_FIELDS.map((f) => f.no)).not.toContain(18);
     expect(DAILY_MIS_VALUE_FIELDS.map((f) => f.no)).not.toContain(27);
   });

@@ -3,11 +3,11 @@
 
 /**
  * Access model (spec “Roles — who can do what”, DECISIONS D-10 / D-11 / D-12).
- * One setting per role per module. Settings are BUNDLES, not a ladder:
+ * One setting per role per module:
  *   SEARCH   → view
- *   SUBMIT   → view + enter
- *   DOWNLOAD → view + export
- *   APPROVE  → view + export + approve/return
+ *   DOWNLOAD → view, search and download (read)
+ *   SUBMIT   → read, plus enter and submit (write)
+ *   APPROVE  → write, plus approve and return (admin)
  *   HIDDEN   → nothing (API answers 403 to every request for the module)
  * Admin is a flagged system role with every capability.
  */
@@ -51,9 +51,9 @@ export type Capability = (typeof CAPABILITIES)[number];
 
 const BUNDLES: Readonly<Record<ModuleSetting, readonly Capability[]>> = {
   SEARCH: ['VIEW'],
-  SUBMIT: ['VIEW', 'SUBMIT'],
+  SUBMIT: ['VIEW', 'DOWNLOAD', 'SUBMIT'],
   DOWNLOAD: ['VIEW', 'DOWNLOAD'],
-  APPROVE: ['VIEW', 'DOWNLOAD', 'APPROVE'],
+  APPROVE: ['VIEW', 'DOWNLOAD', 'SUBMIT', 'APPROVE'],
   HIDDEN: [],
 };
 
