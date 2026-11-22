@@ -22,13 +22,24 @@ npm run start:dev         # http://localhost:4000
 
 `npm run db:reset` rebuilds the dev database from scratch (drop → migrate → seed).
 
+### Admin sign-in (local facility database)
+
+| Email                | Password   | Name                | Role  |
+| -------------------- | ---------- | ------------------- | ----- |
+| ask@makeenenergy.com | Makeen@123 | Achanta Sai Kishore | Admin |
+
+This is the admin for local development. It is not the password for the live site.
+
+The password is stored as a hash that includes this computer's `PASSWORD_PEPPER`. A database copied from someone else rejects this password until the hash is rewritten. `npm run start:dev` does that automatically. `npm run db:admin` does only that step. Both refuse to run when `NODE_ENV=production`.
+
 ### Demo logins (local development only)
 
-Every ACTIVE demo person signs in with `SEED_DEFAULT_PASSWORD` from your `api/.env`.
+`npm run db:seed` builds a separate demo world. Every ACTIVE demo person signs in with `SEED_DEFAULT_PASSWORD` from your `api/.env`.
 
 **Sign-in needs Redis** (Docker `npm run infra:up`, or Memurai on Windows). Without Redis, login and OTP sending answer 503 on purpose: brute-force limits fail closed (D-62). With `EMAIL_PROVIDER=console` / `SMS_PROVIDER=console`, change-password OTPs are written to the API log instead of being sent.
 
 Auth endpoints (all under `/api`):
+
 - `GET auth/csrf`, `POST auth/login`, `auth/refresh`, `auth/logout`
 - `POST auth/password/options`, `auth/password/otp`, `auth/password`
 - `GET me`
@@ -36,6 +47,7 @@ Auth endpoints (all under `/api`):
 Every POST needs the `X-CSRF-Token` header that matches the `mk_csrf` cookie.
 
 People endpoints (Admin; module PEOPLE):
+
 - `GET people` (filters `plantId, roleId, loginStatus, workingStatus, q`, paging, the four cards), `GET people/logins`, `GET people/:id`
 - `PUT people/:id/assignment`, `POST people/:id/activate`, `POST people/:id/deactivate`, `POST people/:id/reset-password`
 - `POST people/import` (multipart `file` + `dryRun`; CSV or .xlsx), `POST people/import/keka-api`, `GET people/import/status`
@@ -43,6 +55,7 @@ People endpoints (Admin; module PEOPLE):
 - `GET designations`, `PUT designations`
 
 Daily MIS endpoints (module DAILY_MIS):
+
 - `GET daily-mis` (filters `plantId, from, to, status`, paging; cards and totals), `GET daily-mis/queue`, `GET daily-mis/export?format=xlsx|pdf` (same filter)
 - `POST daily-mis`, `GET daily-mis/:id`, `PUT daily-mis/:id` (`action: draft|submit`, `version`), `GET daily-mis/:id/revisions/:version`, `GET daily-mis/:id/pdf`
 - `POST daily-mis/:id/approve`, `POST daily-mis/:id/return` (reason), `POST daily-mis/:id/reopen` (reason)
@@ -64,18 +77,18 @@ Daily MIS endpoints (module DAILY_MIS):
 
 The KEKA loader contract and the KEKA API settings are in the repository's `docs/DEPLOYMENT.md` (section "Loading people from KEKA").
 
-| Email | Role | Plants |
-|---|---|---|
-| anita.sharma@makeenenergy.com | Admin | all 22 |
-| ravi.kumar@makeenenergy.com | Plant Manager | HPCL Yediyur |
-| asha.nair@makeenenergy.com | Maintenance Officer | HPCL Yediyur, HPCL Barhi |
-| rahul.verma@makeenenergy.com | Safety Officer | IOCL Gwalior |
-| deepak.sahu@makeenenergy.com | Sr. Operations and Maintenance Officer | IOCL Korba |
-| meera.iyer@makeenenergy.com | Zonal Manager | 8 South plants |
-| rajesh.menon@makeenenergy.com | QHSE Head | all 22 |
-| gopal.das@makeenenergy.com | Staff | HPCL Barhi |
-| manoj.singh@makeenenergy.com | Operation Officer — **inactive, resigned** | HPCL Barhi |
-| sanjay.ghosh@makeenenergy.com | **unmapped designation** (cannot sign in) | — |
+| Email                         | Role                                       | Plants                   |
+| ----------------------------- | ------------------------------------------ | ------------------------ |
+| anita.sharma@makeenenergy.com | Admin                                      | all 22                   |
+| ravi.kumar@makeenenergy.com   | Plant Manager                              | HPCL Yediyur             |
+| asha.nair@makeenenergy.com    | Maintenance Officer                        | HPCL Yediyur, HPCL Barhi |
+| rahul.verma@makeenenergy.com  | Safety Officer                             | IOCL Gwalior             |
+| deepak.sahu@makeenenergy.com  | Sr. Operations and Maintenance Officer     | IOCL Korba               |
+| meera.iyer@makeenenergy.com   | Zonal Manager                              | 8 South plants           |
+| rajesh.menon@makeenenergy.com | QHSE Head                                  | all 22                   |
+| gopal.das@makeenenergy.com    | Staff                                      | HPCL Barhi               |
+| manoj.singh@makeenenergy.com  | Operation Officer — **inactive, resigned** | HPCL Barhi               |
+| sanjay.ghosh@makeenenergy.com | **unmapped designation** (cannot sign in)  | —                        |
 
 | URL                              | What                                            |
 | -------------------------------- | ----------------------------------------------- |
@@ -88,16 +101,17 @@ The KEKA loader contract and the KEKA API settings are in the repository's `docs
 
 ## Scripts
 
-| Script                                | Does                                                                |
-| ------------------------------------- | ------------------------------------------------------------------- |
-| `start:dev` / `build` / `start:prod`  | Nest CLI watch, compile to `dist/`, run compiled build              |
-| `lint` / `typecheck` / `format:check` | ESLint (strict type-checked + security) / `tsc --noEmit` / Prettier |
-| `test`                                | Unit + in-process HTTP tests (Jest; Postgres/Redis faked)           |
-| `test:e2e`                            | End-to-end against real Postgres + Redis — rebuilds `TEST_DATABASE_URL` (must end in `_test`) |
-| `keys:generate`                       | Fill `__GENERATE__` values in `.env` (never overwrites real values) |
-| `db:bootstrap` / `db:migrate` / `db:seed` / `db:reset` | Create roles + DBs (local Postgres) / apply migrations / load demo data / rebuild |
-| `db:generate` / `db:drift`            | Regenerate the Prisma client / show schema ↔ database drift (should be empty) |
-| `infra:up` / `infra:down`             | Start/stop the local dependency containers                          |
+| Script                                                 | Does                                                                                          |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `start:dev` / `build` / `start:prod`                   | Nest CLI watch, compile to `dist/`, run compiled build                                        |
+| `lint` / `typecheck` / `format:check`                  | ESLint (strict type-checked + security) / `tsc --noEmit` / Prettier                           |
+| `test`                                                 | Unit + in-process HTTP tests (Jest; Postgres/Redis faked)                                     |
+| `test:e2e`                                             | End-to-end against real Postgres + Redis — rebuilds `TEST_DATABASE_URL` (must end in `_test`) |
+| `keys:generate`                                        | Fill `__GENERATE__` values in `.env` (never overwrites real values)                           |
+| `db:bootstrap` / `db:migrate` / `db:seed` / `db:reset` | Create roles + DBs (local Postgres) / apply migrations / load demo data / rebuild             |
+| `db:admin`                                             | Rewrite the local admin password with this machine's pepper so `ask@makeenenergy.com` can sign in |
+| `db:generate` / `db:drift`                             | Regenerate the Prisma client / show schema ↔ database drift (should be empty)                 |
+| `infra:up` / `infra:down`                              | Start/stop the local dependency containers                                                    |
 
 ## Docker
 
