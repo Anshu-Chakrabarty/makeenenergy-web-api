@@ -24,11 +24,15 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
   }
 
   async runAs<T>(actor: DbActor, fn: (tx: Tx) => Promise<T>): Promise<T> {
-    return this.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT set_config('app.user_id', ${actor.userId}, true),
-                                  set_config('app.is_admin', ${actor.isAdmin ? 'true' : 'false'}, true)`;
-      return fn(tx);
-    });
+    return this.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.user_id', ${actor.userId}, true),
+                                    set_config('app.is_admin', ${actor.isAdmin ? 'true' : 'false'}, true)`;
+        return fn(tx);
+      },
+      // The hosted database is small. A plant-wide read can take longer than Prisma's 5 second default.
+      { maxWait: 10_000, timeout: 30_000 },
+    );
   }
 
   async onModuleDestroy(): Promise<void> {
