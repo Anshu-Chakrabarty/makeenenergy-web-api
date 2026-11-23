@@ -157,7 +157,10 @@ export class DailyExceptionsService {
     return this.prisma.runAs({ userId: access.userId, isAdmin: access.isAdmin }, fn);
   }
 
-  /** Default range: today (India time), as on the mockup (16-10-2026 to 16-10-2026). */
+  /**
+   * Chosen dates, or today when only one side is set. When the screen is opened with no date,
+   * `datedFilter` points it at the latest day that already has a saved report.
+   */
   range(f: DailyExceptionFilter): { from: string; to: string } {
     const today = istToday();
     const to = f.to ?? (f.from && f.from > today ? f.from : today);
@@ -294,11 +297,36 @@ export class DailyExceptionsService {
     };
   }
 
+  /**
+   * No date chosen: open on the latest saved report (not a blank today). An explicit from or to
+   * is left alone, including a search for today.
+   */
+  private async datedFilter(
+    tx: Tx,
+    scope: PlantScope,
+    f: DailyExceptionFilter,
+  ): Promise<DailyExceptionFilter> {
+    if (f.from !== undefined || f.to !== undefined) return f;
+    const ids = this.ids(scope);
+    const today = istToday();
+    const rows = await tx.$queryRaw<{ day: Date | null }[]>`
+      SELECT max(e.report_date) AS day
+        FROM daily_exceptions e
+        JOIN plants p ON p.id = e.plant_id AND p.deleted_at IS NULL
+       WHERE e.report_date <= ${today}::date
+         AND (${ids}::uuid[] IS NULL OR e.plant_id = ANY(${ids}::uuid[]))`;
+    const day = rows[0]?.day;
+    if (!day) return f;
+    const saved = iso(day);
+    return { ...f, from: saved, to: saved };
+  }
+
   async list(access: ResolvedAccess, q: DailyExceptionQuery): Promise<DailyExceptionPage> {
     const scope = plantFilter(access, q.plantId, NEED.view);
-    const { from, to } = this.range(q);
     return this.asActor(access, async (tx) => {
-      const p = await this.page(tx, scope, q, q.pageSize, (q.page - 1) * q.pageSize);
+      const dated = await this.datedFilter(tx, scope, q);
+      const { from, to } = this.range(dated);
+      const p = await this.page(tx, scope, dated, q.pageSize, (q.page - 1) * q.pageSize);
       return {
         rows: p.rows,
         total: p.total,
@@ -324,9 +352,10 @@ export class DailyExceptionsService {
     plantName: string | null;
   }> {
     const scope = plantFilter(access, f.plantId, NEED.download);
-    const { from, to } = this.range(f);
     return this.asActor(access, async (tx) => {
-      const p = await this.page(tx, scope, f, EXPORT_MAX_ROWS + 1, 0);
+      const dated = await this.datedFilter(tx, scope, f);
+      const { from, to } = this.range(dated);
+      const p = await this.page(tx, scope, dated, EXPORT_MAX_ROWS + 1, 0);
       if (p.rows.length > EXPORT_MAX_ROWS) {
         throw new AppError(
           HttpStatus.PAYLOAD_TOO_LARGE,
