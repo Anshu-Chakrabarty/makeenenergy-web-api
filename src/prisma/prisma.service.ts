@@ -31,7 +31,7 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
         return fn(tx);
       },
       // The hosted database is small. A plant-wide read can take longer than Prisma's 5 second default.
-      { maxWait: 10_000, timeout: 60_000 },
+      { maxWait: 10_000, timeout: 180_000 },
     );
   }
 

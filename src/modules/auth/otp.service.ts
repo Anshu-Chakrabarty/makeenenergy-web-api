@@ -72,6 +72,14 @@ export class OtpService {
         [{ path: 'channel', message: AUTH_MESSAGES.channelRequired }],
       );
     }
+    if (input.channel === 'SMS' && !hasMobile(user.phone)) {
+      throw new AppError(
+        HttpStatus.BAD_REQUEST,
+        ErrorCode.VALIDATION_FAILED,
+        'No mobile number is saved for this login. Use email, or ask Admin to add the mobile number.',
+        [{ path: 'channel', message: 'No mobile number is saved for this login.' }],
+      );
+    }
     // SEC-6: 1 per 30 s and 5 per hour per person.
     const perMinute = await this.limiter.hit(`otp:send:min:${user.id}`, 1, 30_000);
     if (!perMinute.allowed) throw tooMany(AUTH_MESSAGES.otpWait, perMinute.retryAfterMs);
@@ -268,8 +276,11 @@ export class OtpService {
     // Notification control: Off means nothing is sent; the Email switch governs the email channel.
     if (config && !config.enabled) return [];
     const out: OtpChannelOption[] = [];
-    if (user.phone && user.phone.replace(/\D/g, '').length >= 10)
-      out.push({ channel: 'SMS', destination: maskPhone(user.phone) });
+    // Both choices stay on the screen. A missing KEKA mobile is labelled, not hidden.
+    out.push({
+      channel: 'SMS',
+      destination: hasMobile(user.phone) ? maskPhone(user.phone ?? '') : 'No mobile on file',
+    });
     if (config === null || config.emailEnabled)
       out.push({ channel: 'EMAIL', destination: maskEmail(user.email) });
     return out;
@@ -293,6 +304,10 @@ export class OtpService {
       },
     });
   }
+}
+
+function hasMobile(phone: string | null): boolean {
+  return (phone ?? '').replace(/\D/g, '').length >= 10;
 }
 
 function noActiveLogin(): AppError {
