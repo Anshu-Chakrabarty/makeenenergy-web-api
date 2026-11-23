@@ -48,7 +48,8 @@ export function configureApp(app: NestExpressApplication): void {
       frameguard: { action: 'deny' },
       noSniff: true,
       referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-      crossOriginResourcePolicy: { policy: 'same-origin' },
+      // The Vercel site reads these responses from this host. CORS still allows only WEB_ORIGIN.
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
   app.use(cookieParser());

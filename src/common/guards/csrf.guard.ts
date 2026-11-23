@@ -17,8 +17,8 @@ export const CSRF_HEADER = 'x-csrf-token';
 
 /**
  * Double-submit CSRF protection on every state-changing request (SEC-5), public ones included
- * (login CSRF). SameSite=Strict already stops cross-site cookies; this is the second layer.
- * The web app reads the CSRF cookie and echoes it in the X-CSRF-Token header.
+ * (login CSRF). The web app echoes the CSRF token in the X-CSRF-Token header. Production cookies
+ * are sent on the direct call from the Vercel site, so this match is what stops a foreign page.
  */
 @Injectable()
 export class CsrfGuard implements CanActivate {

@@ -1,9 +1,13 @@
 import type { CookieOptions, Request, Response } from 'express';
 
 /**
- * Auth cookies (SEC-3, D-06). HttpOnly + SameSite=Strict always; Secure + name prefixes when
- * secure (production). `__Host-` forbids a Path other than `/`, so the path-scoped refresh cookie
- * uses `__Secure-`. The CSRF cookie is readable by the web app on purpose (double submit).
+ * Auth cookies (SEC-3, D-06). HttpOnly always. The CSRF cookie is readable by the web app on
+ * purpose (double submit). `__Host-` forbids a Path other than `/`, so the path-scoped refresh
+ * cookie uses `__Secure-`.
+ *
+ * Local http uses SameSite=Strict. Production is SameSite=None and Partitioned because the Vercel
+ * page calls this host directly and must wait for it to wake; the double-submit token still has
+ * to match on every change.
  */
 export const REFRESH_COOKIE_PATH = '/api/auth/refresh';
 
@@ -20,7 +24,8 @@ export function cookieNames(secure: boolean): CookieNames {
 }
 
 function base(secure: boolean): CookieOptions {
-  return { secure, sameSite: 'strict', path: '/' };
+  if (!secure) return { secure: false, sameSite: 'strict', path: '/' };
+  return { secure: true, sameSite: 'none', partitioned: true, path: '/' };
 }
 
 export function setSessionCookies(
