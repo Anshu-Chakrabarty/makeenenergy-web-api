@@ -17,7 +17,6 @@ import {
   hoursBetween,
   istToday,
   lastDayOfMonth,
-  licenceStatus,
   monthOf,
   observationUrgency,
   performanceBuckets,
@@ -206,32 +205,32 @@ export class DashboardService {
     return { pending, partial };
   }
 
-  /** DASH-3: licences Due or Expired today (status from the shared rule, never stored). */
+  /** DASH-3: Due or Expired today, counted in the database (same rule as the licence page). */
   private async licenceCounts(
     tx: Tx,
     scope: PlantScope,
   ): Promise<{ due: number; expired: number }> {
+    const plantIds = ids(scope);
+    if (plantIds !== null && plantIds.length === 0) return { due: 0, expired: 0 };
     const today = istToday();
-    const rows = await tx.licence.findMany({
-      where: { plant: { deletedAt: null }, ...plantIn(scope) },
-      select: { frequency: true, startDate: true, endDate: true, remindBeforeDays: true },
-    });
-    let due = 0;
-    let expired = 0;
-    for (const r of rows) {
-      const s = licenceStatus(
-        {
-          frequency: r.frequency,
-          startDate: isoDayOrNull(r.startDate),
-          endDate: isoDayOrNull(r.endDate),
-          remindBeforeDays: r.remindBeforeDays,
-        },
-        today,
-      );
-      if (s === 'DUE') due += 1;
-      else if (s === 'EXPIRED') expired += 1;
-    }
-    return { due, expired };
+    const rows = await tx.$queryRaw<{ due: number; expired: number }[]>`
+      SELECT count(*) FILTER (
+               WHERE l.frequency::text <> 'NA'
+                 AND l.start_date IS NOT NULL
+                 AND l.end_date IS NOT NULL
+                 AND l.end_date < ${today}::date
+             )::int AS expired,
+             count(*) FILTER (
+               WHERE l.frequency::text <> 'NA'
+                 AND l.start_date IS NOT NULL
+                 AND l.end_date IS NOT NULL
+                 AND l.end_date >= ${today}::date
+                 AND ${today}::date >= (l.end_date - l.remind_before_days)
+             )::int AS due
+        FROM licences l
+        JOIN plants p ON p.id = l.plant_id AND p.deleted_at IS NULL
+       WHERE ${plantIds}::uuid[] IS NULL OR l.plant_id = ANY(${plantIds}::uuid[])`;
+    return { due: rows[0]?.due ?? 0, expired: rows[0]?.expired ?? 0 };
   }
 
   /** Module filter Audit: observations past their (revised) target date (D-123). */
