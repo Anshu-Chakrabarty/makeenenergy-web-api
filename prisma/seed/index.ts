@@ -2,7 +2,9 @@
  * Deterministic demo seed (OPS-3). Recreates the approved mockup's world so the running app
  * looks like the mockup. Run with `npm run db:seed` (or `npm run db:reset` for a clean rebuild).
  *
- * - Refuses to run when NODE_ENV=production, or when the database already has people.
+ * - Refuses to run when NODE_ENV=production.
+ * - If the database already has people, it is the live database: leave those rows
+ *   untouched and report the counts. Demo rows are inserted only into an empty database.
  * - Fixed random seed → the same data on every run.
  * - SEED_TODAY=yyyy-mm-dd (default 2026-10-16, the mockup's today) or SEED_TODAY=now.
  * - Demo password = SEED_DEFAULT_PASSWORD (dev .env only). Runs as the schema owner
@@ -40,10 +42,17 @@ async function main(): Promise<void> {
     adapter: new PrismaPg({ connectionString: url, options: PG_SESSION_OPTIONS }),
   });
   try {
-    if ((await prisma.user.count()) > 0) {
-      throw new Error(
-        'Database already has data — use `npm run db:reset` to rebuild it with the demo seed.',
+    const existingPeople = await prisma.user.count();
+    if (existingPeople > 0) {
+      const plants = await prisma.plant.count();
+      const daily = await prisma.dailyMis.count();
+      console.log(
+        [
+          'Database already has the live facility data. Demo rows were not inserted.',
+          `  people ${existingPeople} · plants ${plants} · daily MIS ${daily}`,
+        ].join('\n'),
       );
+      return;
     }
     const cal = new SeedCalendar(resolveSeedToday(process.env['SEED_TODAY']));
     const rng = new Rng(SEED);
