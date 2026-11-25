@@ -148,14 +148,15 @@ describe('save and submit (DMIS-R1, DMIS-R2, BEV-3, SEC-14)', () => {
     expect(stored.rows[0]).toEqual({ c: '368.550', mr_total: 4 });
   });
 
-  it('a second Draft for the same plant and date is allowed; only one may be submitted', async () => {
+  it('a second Daily MIS for the same plant and date is blocked', async () => {
     const asha = await as(ASHA);
     const second = await save(asha, {
       action: 'draft',
       plantId: yediyur,
       reportDate: '2026-05-04',
       values: {},
-    }).expect(201);
+    }).expect(409);
+    expect(second.body.message).toBe(DAILY_MIS_MESSAGES.duplicate);
     const first = await call(asha, 'get', `/api/daily-mis/${rowId}`).expect(200);
     await save(
       asha,
@@ -168,19 +169,13 @@ describe('save and submit (DMIS-R1, DMIS-R2, BEV-3, SEC-14)', () => {
       },
       rowId,
     ).expect(200);
-    const dup = await save(
-      asha,
-      { action: 'submit', version: 1, plantId: yediyur, reportDate: '2026-05-04', values: {} },
-      (second.body as DailyMisDetail).id,
-    ).expect(409);
-    expect(dup.body.message).toBe(DAILY_MIS_MESSAGES.alreadySubmitted);
     const fresh = await save(asha, {
       action: 'submit',
       plantId: yediyur,
       reportDate: '2026-05-04',
       values: {},
     }).expect(409);
-    expect(fresh.body.message).toBe(DAILY_MIS_MESSAGES.alreadySubmitted);
+    expect(fresh.body.message).toBe(DAILY_MIS_MESSAGES.duplicate);
   });
 
   it('refuses a future India date, bad numbers, and a stale version', async () => {

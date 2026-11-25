@@ -6,7 +6,6 @@ import { Prisma } from '../../generated/prisma/client';
 import {
   GRAPH_TREND_MONTHS,
   addDays,
-  averageDecimals,
   firstDayOfMonth,
   formatDate,
   formatMonthYear,
@@ -44,9 +43,13 @@ const decimalLike = (v: unknown): v is { toFixed: (dp: number) => string } =>
 
 const dailySelect = {
   reportDate: true,
+  status: true,
   physicalStock: true,
   bulkReceipts: true,
   accuracyBeyond100: true,
+  cylFilled142: true,
+  cylFilled19: true,
+  cylFilledOther: true,
   ...Object.fromEntries(SUMMARY_DAILY_KEYS.map((k) => [k, true])),
 } as Prisma.DailyMisSelect;
 
@@ -60,7 +63,12 @@ interface Series {
 function chart(
   def: Omit<GraphChart, 'table' | 'points'> & {
     firstColumn: string;
-    points: { label: string; tableLabel: string; values: Record<string, string | null> }[];
+    points: {
+      label: string;
+      tableLabel: string;
+      values: Record<string, string | null>;
+      pending?: boolean;
+    }[];
     total?: boolean;
   },
 ): GraphChart {
@@ -77,7 +85,11 @@ function chart(
   });
   return {
     ...rest,
-    points: points.map((p) => ({ label: p.label, values: p.values })),
+    points: points.map((p) => ({
+      label: p.label,
+      values: p.values,
+      ...(p.pending ? { pending: true } : {}),
+    })),
     table: { columns, rows },
   };
 }
@@ -148,7 +160,7 @@ export class GraphsService {
       const daily = await tx.dailyMis.findMany({
         where: {
           plantId: q.plantId,
-          status: 'APPROVED',
+          status: { in: ['APPROVED', 'PENDING', 'RETURNED'] },
           reportDate: {
             gte: dayOf(firstDayOfMonth(first)),
             lte: dayOf(lastDayOfMonth(month)),
@@ -160,10 +172,10 @@ export class GraphsService {
       const monthly = await tx.monthlyMis.findMany({
         where: {
           plantId: q.plantId,
-          status: 'APPROVED',
           month: { gte: dayOf(firstDayOfMonth(first)), lte: dayOf(firstDayOfMonth(month)) },
         },
         select: {
+          status: true,
           month: true,
           ebUnits: true,
           dgUnits: true,
@@ -192,6 +204,7 @@ export class GraphsService {
     months: string[],
     daily: object[],
     monthly: {
+      status: string;
       month: Date;
       ebUnits: Prisma.Decimal | null;
       dgUnits: Prisma.Decimal | null;
@@ -220,21 +233,29 @@ export class GraphsService {
     const inMonth = new Map(
       daily.filter((r) => dayOfRow(r).startsWith(month)).map((r) => [dayOfRow(r), r]),
     );
+    const approved = (r: object): boolean => Reflect.get(r, 'status') === 'APPROVED';
     const perDay = (
       values: (r: object) => Record<string, string | null>,
       series: Series[],
-    ): { label: string; tableLabel: string; values: Record<string, string | null> }[] =>
+    ): {
+      label: string;
+      tableLabel: string;
+      values: Record<string, string | null>;
+      pending?: boolean;
+    }[] =>
       days.map((d) => {
         const r = inMonth.get(d);
+        const ok = r !== undefined && approved(r);
         return {
           label: shortDayLabel(d),
           tableLabel: formatDate(d),
-          values: r ? values(r) : Object.fromEntries(series.map((s) => [s.key, null])),
+          pending: r !== undefined && !ok,
+          values: ok && r ? values(r) : Object.fromEntries(series.map((s) => [s.key, null])),
         };
       });
     const monthlyOf = new Map(monthly.map((m) => [isoDay(m.month).slice(0, 7), m]));
     const dailyByMonth = new Map(
-      months.map((m) => [m, daily.filter((r) => dayOfRow(r).startsWith(m))]),
+      months.map((m) => [m, daily.filter((r) => approved(r) && dayOfRow(r).startsWith(m))]),
     );
     const perMonth = (
       values: (m: string) => Record<string, string | null>,
@@ -248,9 +269,15 @@ export class GraphsService {
       pick: (m: (typeof monthly)[number]) => Record<string, string | null>,
       series: Series[],
     ) =>
-      perMonth((m) => {
+      months.map((m) => {
         const row = monthlyOf.get(m);
-        return row ? pick(row) : Object.fromEntries(series.map((s) => [s.key, null]));
+        const pending = row !== undefined && row.status !== 'APPROVED';
+        return {
+          label: shortMonthLabel(m),
+          tableLabel: formatMonthYear(m),
+          pending,
+          values: row ? pick(row) : Object.fromEntries(series.map((s) => [s.key, null])),
+        };
       });
 
     const s1: Series[] = [{ key: 'gainLoss', label: 'Stock gain / loss (MT)' }];
@@ -259,16 +286,15 @@ export class GraphsService {
       { key: 'fireEngine', label: 'Fire engine (litres)' },
     ];
     const s3: Series[] = [
-      { key: 'eb', label: 'EB units (kW)' },
-      { key: 'dg', label: 'DG units (kW)' },
+      { key: 'eb', label: 'EB units (kWh)' },
+      { key: 'dg', label: 'DG units (kWh)' },
     ];
+    const shiftHours = manHour.hoursPerShift ?? 8;
     const s4: Series[] = [
       // Three different units: each is drawn in its own panel (no second y-axis, D-128).
       { key: 'production', label: 'Production (MT)', unit: 'MT' },
       { key: 'otHours', label: 'OT hours', unit: 'hours' },
-      ...(manHour.enabled
-        ? [{ key: 'perManHour', label: 'MT per man hour', unit: 'MT per man hour' }]
-        : []),
+      { key: 'perManHour', label: 'MT per man hour', unit: 'MT per man hour' },
     ];
     const s5: Series[] = [
       { key: 'operating', label: 'Operating cost / MT (Rs.)' },
@@ -298,18 +324,19 @@ export class GraphsService {
       chart({
         id: 1,
         title: 'Monthly stock loss / gain',
-        source: `Approved Daily MIS 20 · ${monthLabel}`,
+        source: `Approved Daily MIS, stock gain or loss · ${monthLabel}`,
         kind: 'bar',
         unit: 'MT',
         series: s1,
         firstColumn: 'Date',
         points: perDay((r) => ({ gainLoss: dec(r, 'stockGainLoss', 3) }), s1),
-        note: null,
+        total: true,
+        note: 'A blank day has no approved Daily MIS. 0 is a saved zero. A day that is saved but not approved is marked.',
       }),
       chart({
         id: 2,
         title: 'Diesel consumed',
-        source: `Approved Monthly MIS 31 + 32 · ${trend}`,
+        source: `Monthly MIS diesel · ${trend}`,
         kind: 'stacked',
         unit: 'litres',
         series: s2,
@@ -324,19 +351,19 @@ export class GraphsService {
       chart({
         id: 3,
         title: 'Electricity units',
-        source: `Approved Monthly MIS 26 + 27 · ${trend}`,
+        source: `Monthly MIS electricity · ${trend}`,
         kind: 'stacked',
-        unit: 'kW',
+        unit: 'kWh',
         series: s3,
         firstColumn: 'Month',
         points: monthCols((m) => ({ eb: fixed(m.ebUnits, 2), dg: fixed(m.dgUnits, 2) }), s3),
         total: true,
-        note: null,
+        note: 'Unit is kWh. A month that is saved but not approved yet is shown and marked. A blank month has no Monthly MIS.',
       }),
       chart({
         id: 4,
         title: 'Production per man hour',
-        source: `Approved Daily MIS (production 11–14, OT hours 4) · ${trend}`,
+        source: `Approved Daily MIS, production and OT hours · ${trend}`,
         kind: 'line',
         unit: 'MT / hours',
         series: s4,
@@ -346,27 +373,24 @@ export class GraphsService {
           if (rows.length === 0) return Object.fromEntries(s4.map((s) => [s.key, null]));
           const s = summaryOf(rows);
           const shifts = Number(s.totalShifts);
+          const ot = Number(s.totalOtHours);
+          const denom = shifts * shiftHours + (Number.isFinite(ot) ? ot : 0);
           const out: Record<string, string | null> = {
             production: s.totalProduction,
             otHours: s.totalOtHours,
+            perManHour:
+              denom > 0
+                ? new Prisma.Decimal(s.totalProduction).div(denom).toFixed(3)
+                : null,
           };
-          if (manHour.enabled && manHour.hoursPerShift !== null)
-            out['perManHour'] =
-              shifts > 0
-                ? new Prisma.Decimal(s.totalProduction)
-                    .div(shifts * manHour.hoursPerShift)
-                    .toFixed(3)
-                : null;
           return out;
         }),
-        note: manHour.enabled
-          ? `MT per man hour = production MT ÷ (shifts × ${String(manHour.hoursPerShift)} hours per shift).`
-          : 'The formula production MT ÷ (shifts × hours per shift) is Off. Admin can switch it On.',
+        note: `MT per man hour = production MT ÷ (shifts × ${String(shiftHours)} hours per shift + OT hours).`,
       }),
       chart({
         id: 5,
-        title: 'Production per MT',
-        source: `Approved Monthly MIS 40, 41 · ${trend}`,
+        title: 'Cost per MT',
+        source: `Monthly MIS operating cost and tender cost per MT · ${trend}`,
         kind: 'line',
         unit: 'Rs. / MT',
         series: s5,
@@ -383,7 +407,7 @@ export class GraphsService {
       chart({
         id: 6,
         title: 'Spare usage',
-        source: `Approved Monthly MIS 55–58 · ${trend}`,
+        source: `Monthly MIS spare usage · ${trend}`,
         kind: 'grouped',
         unit: '%',
         series: s6,
@@ -402,7 +426,7 @@ export class GraphsService {
       chart({
         id: 7,
         title: 'Filling accuracy',
-        source: `Approved Daily MIS 39–42, monthly average · ${trend}`,
+        source: `Approved Daily MIS filling accuracy, weighted by cylinders filled · ${trend}`,
         kind: 'stacked100',
         unit: '%',
         series: s7,
@@ -410,23 +434,38 @@ export class GraphsService {
         points: perMonth((m) => {
           const rows = dailyByMonth.get(m) ?? [];
           if (rows.length === 0) return Object.fromEntries(s7.map((s) => [s.key, null]));
-          const s = summaryOf(rows);
+          const weight = (r: object): number => {
+            const n = (k: string): number => {
+              const v = dec(r, k, 0);
+              return v === null ? 0 : Number(v);
+            };
+            return n('cylFilled142') + n('cylFilled19') + n('cylFilledOther');
+          };
+          const weighted = (key: string): string | null => {
+            let num = 0;
+            let den = 0;
+            for (const r of rows) {
+              const pct = dec(r, key, 2);
+              const w = weight(r);
+              if (pct === null || w <= 0) continue;
+              num += Number(pct) * w;
+              den += w;
+            }
+            return den === 0 ? null : (num / den).toFixed(2);
+          };
           return {
-            zero: s.accuracyZeroAvg,
-            p50: s.accuracy50Avg,
-            p100: s.accuracy100Avg,
-            beyond: averageDecimals(
-              rows.map((r) => dec(r, 'accuracyBeyond100', 2)),
-              2,
-            ),
+            zero: weighted('accuracyZero'),
+            p50: weighted('accuracy50'),
+            p100: weighted('accuracy100'),
+            beyond: weighted('accuracyBeyond100'),
           };
         }),
-        note: null,
+        note: 'Each day is weighted by the cylinders filled that day. A blank month has no approved Daily MIS.',
       }),
       chart({
         id: 8,
         title: 'Productivity — stock, receipt, dispatch',
-        source: `Approved Daily MIS (physical stock 19, receipts 10, despatch 11–14) · ${monthLabel}`,
+        source: `Approved Daily MIS, physical stock, receipts and despatch · ${monthLabel}`,
         kind: 'line',
         unit: 'MT',
         series: s8,
@@ -447,7 +486,7 @@ export class GraphsService {
           }),
           s8,
         ),
-        note: null,
+        note: 'A blank is a day with no approved Daily MIS. 0 is a saved zero.',
       }),
     ];
   }

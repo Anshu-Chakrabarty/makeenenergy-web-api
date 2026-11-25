@@ -88,17 +88,20 @@ describe('reviewCheckStatus (D-27) and contracts ending (CARD-8)', () => {
     contractEnd: '2028-09-30',
     observationsOverdue: 0,
     observationsDueSoon: 0,
-    licencesExpired: 0,
-    licencesDue: 0,
+    statutoryExpired: 0,
+    statutoryDue: 0,
+    calibrationExpired: 0,
+    calibrationDue: 0,
   };
-  it('Critical: an overdue observation, an expired licence or an ended contract', () => {
+  it('Critical: an overdue observation, an expired statutory licence or an ended contract', () => {
     expect(reviewCheckStatus({ ...base, observationsOverdue: 1 }, TODAY)).toBe('CRITICAL');
-    expect(reviewCheckStatus({ ...base, licencesExpired: 1 }, TODAY)).toBe('CRITICAL');
+    expect(reviewCheckStatus({ ...base, statutoryExpired: 1 }, TODAY)).toBe('CRITICAL');
     expect(reviewCheckStatus({ ...base, contractEnd: '2025-07-31' }, TODAY)).toBe('CRITICAL');
   });
-  it('Attention: due soon, a Due licence, or the contract ends within 90 days', () => {
+  it('Attention: due soon, a Due licence, a calibration, or the contract ends within 90 days', () => {
     expect(reviewCheckStatus({ ...base, observationsDueSoon: 2 }, TODAY)).toBe('ATTENTION');
-    expect(reviewCheckStatus({ ...base, licencesDue: 1 }, TODAY)).toBe('ATTENTION');
+    expect(reviewCheckStatus({ ...base, statutoryDue: 1 }, TODAY)).toBe('ATTENTION');
+    expect(reviewCheckStatus({ ...base, calibrationExpired: 4 }, TODAY)).toBe('ATTENTION');
     expect(reviewCheckStatus({ ...base, contractEnd: '2026-12-31' }, TODAY)).toBe('ATTENTION');
   });
   it('OK otherwise', () => {

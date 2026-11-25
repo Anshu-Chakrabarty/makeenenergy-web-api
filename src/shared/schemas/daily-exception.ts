@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { EXCEPTION_STATUSES, PLANT_OPERATING_STATUSES, YES_NO } from '../enums';
 import {
   DAILY_EXCEPTION_LINES,
+  failureWhen,
   type ExceptionDetailDef,
   type ExceptionLineDef,
 } from '../fields/daily-exception';
@@ -23,9 +24,9 @@ import {
 export const DAILY_EXCEPTION_MESSAGES = {
   plantStatusRequired: 'Choose the plant status.',
   answerRequired: 'Answer Yes or No.',
-  remarksRequired: 'Enter remarks — required when the answer is Yes.',
+  remarksRequired: 'Enter remarks — required when this check fails.',
   incidentRequired: 'Describe the incident — required when there is an incident.',
-  detailRequired: 'Required when the answer is Yes.',
+  detailRequired: 'Required when this check fails.',
   allLinesRequired: 'Answer all 13 lines before you submit.',
   alreadyExists: 'A Daily Exception for this plant and date already exists. Open it instead.',
   stale: 'Someone else saved this Daily Exception. Reload it and try again.',
@@ -102,7 +103,7 @@ export function exceptionSaveSchema(defs: readonly ExceptionLineDef[]) {
           });
           continue;
         }
-        if (line.answer !== 'YES') continue;
+        if (line.answer !== failureWhen(def)) continue;
         for (const d of def.details) {
           if (!detailApplies(d, line.details)) continue;
           const val = line.details[d.key];

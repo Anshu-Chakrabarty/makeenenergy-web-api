@@ -464,7 +464,7 @@ describe('Graphs (GR-0…GR-8, BTN-P9)', () => {
       expect(gr1.table.rows[i]?.[1] ?? null).toBe(pt.values['gainLoss'] ?? null);
     });
 
-    // GR-2: Approved Monthly MIS only (Yediyur September is Pending → no value).
+    // GR-2: a saved month is shown. A month that is not approved is marked, never turned into 0.
     const gr2 = v.charts[1];
     const monthly = await db.query<{ month: string; dg: string | null; status: string }>(
       `SELECT to_char(month, 'YYYY-MM') AS month, diesel_dg::text AS dg, status::text
@@ -472,13 +472,18 @@ describe('Graphs (GR-0…GR-8, BTN-P9)', () => {
       [yed],
     );
     v.months.forEach((m, i) => {
-      const row = monthly.rows.find((r) => r.month === m && r.status === 'APPROVED');
+      const row = monthly.rows.find((r) => r.month === m);
       expect(gr2?.points[i]?.values['dg'] ?? null).toBe(row?.dg ?? null);
+      expect(Boolean(gr2?.points[i]?.pending)).toBe(row !== undefined && row.status !== 'APPROVED');
     });
     expect(monthly.rows.find((r) => r.month === '2026-09')?.status).toBe('PENDING');
 
     expect(v.manHour).toEqual({ enabled: false, hoursPerShift: null });
-    expect(v.charts[3]?.series.map((s) => s.key)).toEqual(['production', 'otHours']);
+    expect(v.charts[3]?.series.map((s) => s.key)).toEqual([
+      'production',
+      'otHours',
+      'perManHour',
+    ]);
   });
 
   it('GR-4 switch: Admin only, needs hours per shift; adds the MT per man hour line', async () => {
@@ -506,10 +511,15 @@ describe('Graphs (GR-0…GR-8, BTN-P9)', () => {
       [yed],
     );
     expect(shifts).toBeGreaterThan(0);
-    // Exact decimal arithmetic in Postgres (never JS floats): production MT ÷ (shifts × 8).
+    // production MT ÷ (shifts × 8 + OT hours).
+    const ot = await count(
+      `SELECT COALESCE(sum(ot_hours),0)::int n FROM daily_mis
+        WHERE plant_id = $1 AND status = 'APPROVED' AND report_date BETWEEN '2026-09-01' AND '2026-09-30'`,
+      [yed],
+    );
     const exact = await db.query<{ v: string }>(
-      `SELECT round($1::numeric / ($2::numeric * 8), 3)::text AS v`,
-      [sep?.['production'], shifts],
+      `SELECT round($1::numeric / ($2::numeric * 8 + $3::numeric), 3)::text AS v`,
+      [sep?.['production'], shifts, ot],
     );
     expect(sep?.['perManHour']).toBe(exact.rows[0]?.v);
     await call(admin, 'put', '/api/graphs/settings')

@@ -3,7 +3,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { isoDayOrNull } from '../../common/db/people-names';
 import { PrismaService, type Tx } from '../../prisma/prisma.service';
 import {
-  LICENCE_STATUS_LABEL,
   effectiveTargetDate,
   formatDate,
   istToday,
@@ -49,11 +48,27 @@ export class DailyNoticesJob {
     await this.prisma.runAs(SYSTEM_ACTOR, async (tx) => {
       await this.licences(tx, today, result);
       await this.observations(tx, today, result);
+      await this.unmappedDesignations(tx, today);
     });
     this.log.log(
       `Daily notices ${today}: licence due ${String(result.licenceDue)}, expired ${String(result.licenceExpired)}, audit overdue ${String(result.auditOverdue)}, already raised ${String(result.alreadyRaised)}`,
     );
     return result;
+  }
+
+  private async adminIds(tx: Tx): Promise<string[]> {
+    const rows = await tx.user.findMany({
+      where: {
+        loginStatus: 'ACTIVE',
+        workingStatus: 'WORKING',
+        OR: [
+          { baseRole: { isAdmin: true } },
+          { assignments: { some: { role: { isAdmin: true } } } },
+        ],
+      },
+      select: { id: true },
+    });
+    return rows.map((u) => u.id);
   }
 
   private async licences(tx: Tx, today: string, result: DailyNoticeRun): Promise<void> {
@@ -62,16 +77,29 @@ export class DailyNoticesJob {
       select: {
         id: true,
         plantId: true,
+        licenceType: true,
         docRef: true,
         startDate: true,
         endDate: true,
         frequency: true,
         remindBeforeDays: true,
         item: { select: { title: true } },
-        plant: { select: { name: true } },
+        plant: { select: { name: true, managerId: true } },
         remindUsers: { select: { userId: true } },
       },
     });
+    const admins = await this.adminIds(tx);
+    type Hit = {
+      id: string;
+      plantId: string;
+      plantName: string;
+      title: string;
+      kind: string;
+      status: 'DUE' | 'EXPIRED';
+      endDate: string | null;
+      recipients: string[];
+    };
+    const hits: Hit[] = [];
     for (const l of rows) {
       const endDate = isoDayOrNull(l.endDate);
       const status = licenceStatus(
@@ -84,29 +112,104 @@ export class DailyNoticesJob {
         today,
       );
       if (status !== 'DUE' && status !== 'EXPIRED') continue;
-      const label = LICENCE_STATUS_LABEL[status];
-      const ref = l.docRef ? ` (${l.docRef})` : '';
+      const listed = l.remindUsers.map((u) => u.userId);
+      const recipients = [
+        ...new Set([...listed, ...(listed.length === 0 ? [l.plant.managerId] : []), ...admins]),
+      ];
+      const calibration = l.licenceType !== 'STATUTORY';
+      hits.push({
+        id: l.id,
+        plantId: l.plantId,
+        plantName: l.plant.name,
+        title: l.item.title,
+        kind: calibration ? 'Calibration' : 'Licence',
+        status,
+        endDate,
+        recipients,
+      });
+    }
+    const groups = new Map<string, Hit[]>();
+    for (const h of hits) {
+      const key = `${h.plantId}:${h.status}`;
+      const list = groups.get(key) ?? [];
+      list.push(h);
+      groups.set(key, list);
+    }
+    const skipped: string[] = [];
+    for (const group of groups.values()) {
+      const first = group[0];
+      if (!first) continue;
+      const verb = first.status === 'EXPIRED' ? 'overdue' : 'due';
+      const kinds = [...new Set(group.map((g) => g.kind))].join(' and ');
+      const names = group.map((g) => g.title);
+      const title =
+        group.length === 1
+          ? `${first.kind} ${verb} – ${first.title} (${first.plantName})`
+          : `${kinds} ${verb} – ${String(group.length)} items (${first.plantName})`;
       const outcome = await this.notices.notify(tx, {
         category: 'SYSTEM',
         event: 'LICENCE_DUE',
-        title: `Licence ${label} — ${l.item.title}, ${l.plant.name}`,
-        body:
-          status === 'DUE'
-            ? `${l.item.title}${ref} ends on ${formatDate(endDate ?? today)}. Renewal window is open.`
-            : `${l.item.title}${ref} expired on ${formatDate(endDate ?? today)}.`,
-        plantId: l.plantId,
-        link: { entity: 'licence', id: l.id },
-        recipients: l.remindUsers.map((u) => u.userId),
+        title,
+        body: names.join(', '),
+        plantId: first.plantId,
+        link: { entity: 'licence', id: first.id },
+        recipients: [...new Set(group.flatMap((g) => g.recipients))],
         canAcknowledge: true,
-        dedupeKey: `licence-${status.toLowerCase()}:${l.id}:${endDate ?? ''}`,
-        sentTo: `Remind list (${String(l.remindUsers.length)})`,
+        dedupeKey: `licence-${first.status.toLowerCase()}:${first.plantId}:${today}`,
+        sentTo: `Plant Manager and Admin, ${first.plantName}`,
       });
       if (outcome.state === 'DUPLICATE') result.alreadyRaised += 1;
       else if (outcome.state === 'SENT') {
-        if (status === 'DUE') result.licenceDue += 1;
-        else result.licenceExpired += 1;
-      }
+        if (first.status === 'DUE') result.licenceDue += group.length;
+        else result.licenceExpired += group.length;
+      } else if (outcome.state === 'SKIPPED') skipped.push(`${first.plantName}: ${title}`);
     }
+    if (skipped.length > 0 && admins.length > 0) {
+      await this.notices.notify(tx, {
+        category: 'SYSTEM',
+        event: 'LICENCE_DUE',
+        title: `Skipped licence reminders – ${today}`,
+        body: skipped.join('; '),
+        recipients: admins,
+        canAcknowledge: true,
+        dedupeKey: `licence-skipped:${today}`,
+        sentTo: 'Admin',
+      });
+    }
+  }
+
+  /** One notice to Admin when working people still have a designation with no role. */
+  private async unmappedDesignations(tx: Tx, today: string): Promise<void> {
+    const maps = await tx.designationRoleMap.findMany({ select: { designation: true } });
+    const mapped = new Set(maps.map((m) => m.designation.toLowerCase()));
+    const people = await tx.user.findMany({
+      where: {
+        workingStatus: 'WORKING',
+        assignments: { none: {} },
+        NOT: { baseRole: { isAdmin: true } },
+      },
+      select: { designation: true },
+    });
+    const names = [
+      ...new Set(
+        people
+          .map((p) => p.designation)
+          .filter((d) => d.trim() !== '' && !mapped.has(d.toLowerCase())),
+      ),
+    ];
+    if (names.length === 0) return;
+    const admins = await this.adminIds(tx);
+    if (admins.length === 0) return;
+    await this.notices.notify(tx, {
+      category: 'SYSTEM',
+      event: null,
+      title: 'Designations are not mapped',
+      body: `${names.join(', ')} — these people cannot sign in until an Admin maps the designation.`,
+      recipients: admins,
+      canAcknowledge: true,
+      dedupeKey: `unmapped-designations:${today}`,
+      sentTo: 'Admin',
+    });
   }
 
   private async observations(tx: Tx, today: string, result: DailyNoticeRun): Promise<void> {

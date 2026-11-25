@@ -27,12 +27,17 @@ function issues(r: {
   return Object.fromEntries((r.error?.issues ?? []).map((i) => [i.path.join('.'), i.message]));
 }
 
-/** All 13 lines No, with overrides. */
+/** Passing answer: working-condition checks are Yes; "Any …" checks are No. */
+function passingAnswer(n: number): 'YES' | 'NO' {
+  return n === 11 || n === 13 ? 'NO' : 'YES';
+}
+
+/** All 13 lines in the passing state, with overrides. */
 function lines(over: Record<string, { answer: 'YES' | 'NO' | null; details?: object }> = {}) {
   const out: Record<string, { answer: 'YES' | 'NO' | null; details: object }> = {};
   for (let n = 1; n <= 13; n += 1) {
     const o = over[String(n)];
-    out[String(n)] = { answer: o ? o.answer : 'NO', details: o?.details ?? {} };
+    out[String(n)] = { answer: o ? o.answer : passingAnswer(n), details: o?.details ?? {} };
   }
   return out;
 }
@@ -62,25 +67,25 @@ describe('dailyExceptionSaveSchema', () => {
     expect(m['lines.7.answer']).toBe(DAILY_EXCEPTION_MESSAGES.answerRequired);
   });
 
-  it('a Yes needs its Remarks; an incident needs its description (UXV-9)', () => {
+  it('a failed check needs its Remarks; an incident needs its description (UXV-9)', () => {
     const r = dailyExceptionSaveSchema.safeParse({
       ...base,
       action: 'submit',
-      lines: lines({ '1': { answer: 'YES' }, '13': { answer: 'YES', details: { remarks: ' ' } } }),
+      lines: lines({ '1': { answer: 'NO' }, '13': { answer: 'YES', details: { remarks: ' ' } } }),
     });
     const m = issues(r);
     expect(m['lines.1.details.remarks']).toBe(DAILY_EXCEPTION_MESSAGES.remarksRequired);
     expect(m['lines.13.details.remarks']).toBe(DAILY_EXCEPTION_MESSAGES.incidentRequired);
   });
 
-  it('a Yes on line 3 / 4 needs every extra field it shows (tank levels follow the count)', () => {
+  it('a failed line 3 / 4 needs every extra field it shows (tank levels follow the count)', () => {
     const r = dailyExceptionSaveSchema.safeParse({
       ...base,
       action: 'submit',
       lines: lines({
-        '3': { answer: 'YES', details: { jockeyPump1: 'AUTO' } },
+        '3': { answer: 'NO', details: { jockeyPump1: 'AUTO' } },
         '4': {
-          answer: 'YES',
+          answer: 'NO',
           details: {
             tankCount: '2',
             tankCapacityKl: '500',
@@ -135,18 +140,18 @@ describe('Daily Exception rules', () => {
   const parse = (l: object): ExceptionLines =>
     cleanLines(dailyExceptionSaveSchema.parse({ ...base, action: 'draft', lines: l }).lines);
 
-  it('No (or unanswered) clears the extra fields; tank levels follow the tank count (DEX-R6)', () => {
+  it('a passing answer clears the extra fields; tank levels follow the tank count (DEX-R6)', () => {
     const l = parse({
-      '1': { answer: 'NO', details: { remarks: 'left over' } },
-      '4': { answer: 'YES', details: { tankCount: '1', tank1LevelM: '9', tank2LevelM: '8' } },
+      '1': { answer: 'YES', details: { remarks: 'left over' } },
+      '4': { answer: 'NO', details: { tankCount: '1', tank1LevelM: '9', tank2LevelM: '8' } },
     });
-    expect(l['1']).toEqual({ answer: 'NO', details: {} });
+    expect(l['1']).toEqual({ answer: 'YES', details: {} });
     expect(l['4']?.details).toEqual({ tankCount: '1', tank1LevelM: '9.00' });
     expect(l['13']).toEqual({ answer: null, details: {} });
     expect(allAnswered(l)).toBe(false);
   });
 
-  it('status: Draft → Partial; all No + Operational → Completed; Yes or Non-operational → Pending', () => {
+  it('status: Draft → Partial; every check passing + Operational → Completed; a failure or Non-operational → Pending', () => {
     const clean = parse(lines());
     expect(allAnswered(clean)).toBe(true);
     expect(exceptionStatus('draft', 'OPERATIONAL', clean)).toBe('PARTIAL');
@@ -156,14 +161,14 @@ describe('Daily Exception rules', () => {
     expect(exceptionStatus('submit', 'OPERATIONAL', yes)).toBe('PENDING');
   });
 
-  it('highlight: first Yes line 1→12, then the incident; generated text for lines without Remarks (D-22)', () => {
+  it('highlight: first failed line, then the incident; generated text for lines without Remarks (D-22)', () => {
     const a = parse(
       lines({
         '3': {
-          answer: 'YES',
+          answer: 'NO',
           details: { jockeyPump1: 'AUTO', jockeyPump2: 'MANUAL', jockeyRuns24h: 14 },
         },
-        '6': { answer: 'YES', details: { remarks: 'ESD button 3 stuck' } },
+        '6': { answer: 'NO', details: { remarks: 'ESD button 3 stuck' } },
         '13': { answer: 'YES', details: { remarks: 'Minor leak' } },
       }),
     );
@@ -174,7 +179,7 @@ describe('Daily Exception rules', () => {
     expect(problemHighlight('PENDING', 'OPERATIONAL', b)).toBe('Incident: Minor leak');
     const c = parse(
       lines({
-        '12': { answer: 'YES', details: { cameraTotal: 24, dsoObservation: 'Cam 7 down' } },
+        '12': { answer: 'NO', details: { cameraTotal: 24, dsoObservation: 'Cam 7 down' } },
       }),
     );
     expect(problemHighlight('PENDING', 'OPERATIONAL', c)).toBe('Line 12 — Cam 7 down');
@@ -183,7 +188,7 @@ describe('Daily Exception rules', () => {
     );
     expect(problemHighlight('COMPLETED', 'OPERATIONAL', parse(lines()))).toBeNull();
     expect(problemHighlight('PARTIAL', 'OPERATIONAL', a)).toBeNull();
-    const long = parse(lines({ '1': { answer: 'YES', details: { remarks: 'x'.repeat(500) } } }));
+    const long = parse(lines({ '1': { answer: 'NO', details: { remarks: 'x'.repeat(500) } } }));
     expect(problemHighlight('PENDING', 'OPERATIONAL', long)?.length).toBe(HIGHLIGHT_MAX);
   });
 });

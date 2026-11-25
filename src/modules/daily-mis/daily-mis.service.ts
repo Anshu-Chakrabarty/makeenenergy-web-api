@@ -20,13 +20,15 @@ import { Prisma } from '../../generated/prisma/client';
 import {
   DAILY_MIS_GRID_FIELDS,
   DAILY_MIS_MESSAGES,
+  DAILY_MIS_SECTIONS,
+  DAILY_MIS_VALUE_FIELDS,
   REPORT_STATUSES,
-  firstDayOfMonth,
+  addDays,
   formatDate,
   fromScaled,
   hoursBetween,
   istToday,
-  monthOf,
+  waitingDays,
   toScaled,
   type ApprovalQueueItem,
   type DailyMisCards,
@@ -37,6 +39,7 @@ import {
   type DailyMisQuery,
   type DailyMisRevision,
   type DailyMisSaveInput,
+  type DailyMisValues,
   type DailyMisTotals,
   type GridSort,
   type PersonRef,
@@ -87,6 +90,7 @@ const listSelect = {
   carouselsOperated: true,
   stockGainLoss: true,
   accuracyZero: true,
+  returnReason: true,
   enteredById: true,
   updatedAt: true,
   plant: { select: { id: true, name: true, code: true } },
@@ -188,11 +192,11 @@ export class DailyMisService {
     return this.prisma.runAs({ userId: access.userId, isAdmin: access.isAdmin }, fn);
   }
 
-  /** Default range: the 1st of the current India month to today (mockup 01-10 … 16-10). */
+  /** Default range: the last 30 days through today, so the KPI cards match the table on load. */
   range(f: DailyMisFilter): { from: string; to: string } {
     const today = istToday();
     const to = f.to ?? (f.from && f.from > today ? f.from : today);
-    const from = f.from ?? firstDayOfMonth(monthOf(to));
+    const from = f.from ?? addDays(to, -29);
     return { from, to };
   }
 
@@ -309,6 +313,7 @@ export class DailyMisService {
       stockGainLoss: fixed(r.stockGainLoss, 3),
       accuracyZero: fixed(r.accuracyZero, 2),
       status: r.status,
+      returnReason: r.returnReason,
       enteredBy: names.get(r.enteredById) ?? '—',
       updatedAt: r.updatedAt.toISOString(),
     };
@@ -508,6 +513,7 @@ export class DailyMisService {
       reopenedAt: stamp(r.reopenedAt),
       reopenReason: r.reopenReason,
       waitingHours: waiting(r.createdAt, r.approvedAt ?? new Date()),
+      waitingDays: waitingDays(r.createdAt, r.approvedAt ?? new Date()),
       revisions: r.revisions.map((v) => ({
         version: v.version,
         status: v.status,
@@ -590,6 +596,26 @@ export class DailyMisService {
     if (!p) throw forbidden('You do not have access to this plant.');
   }
 
+  /**
+   * A submit may not become Pending while a required production or stock field is blank.
+   * Notes stay optional. Zero is a real value, not an empty one.
+   */
+  private assertReadyToSubmit(values: DailyMisValues): void {
+    const missing = DAILY_MIS_VALUE_FIELDS.filter(
+      (f) => f.section !== DAILY_MIS_SECTIONS.notes,
+    ).filter((f) => {
+      const v = values[f.key as keyof DailyMisValues];
+      return v === null || v === undefined || (typeof v === 'string' && v.trim() === '');
+    });
+    if (missing.length === 0) return;
+    throw new AppError(
+      HttpStatus.BAD_REQUEST,
+      ErrorCode.VALIDATION_FAILED,
+      'Please complete all required fields before continuing.',
+      missing.map((f) => ({ path: `values.${f.key}`, message: 'This field is required.' })),
+    );
+  }
+
   private uniqueViolation(e: unknown): never {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')
       throw conflict(DAILY_MIS_MESSAGES.alreadySubmitted);
@@ -609,8 +635,11 @@ export class DailyMisService {
     try {
       return await this.asActor(access, async (tx) => {
         await this.plantExists(tx, input.plantId);
-        if (submit && (await this.nonDraftExists(tx, input.plantId, input.reportDate)))
-          throw conflict(DAILY_MIS_MESSAGES.alreadySubmitted);
+        const existing = await tx.dailyMis.count({
+          where: { plantId: input.plantId, reportDate: dateOf(input.reportDate) },
+        });
+        if (existing > 0) throw conflict(DAILY_MIS_MESSAGES.duplicate);
+        if (submit) this.assertReadyToSubmit(values);
         const now = new Date();
         const status: ReportStatus = submit ? 'PENDING' : 'DRAFT';
         const row = await tx.dailyMis.create({
@@ -717,6 +746,7 @@ export class DailyMisService {
           (await this.nonDraftExists(tx, input.plantId, input.reportDate, id))
         )
           throw conflict(DAILY_MIS_MESSAGES.alreadySubmitted);
+        if (submit) this.assertReadyToSubmit(values);
         const now = new Date();
         const updated = await tx.dailyMis.update({
           where: { id },
@@ -932,6 +962,7 @@ export class DailyMisService {
         enteredBy: names.get(r.enteredById) ?? '—',
         lastSavedAt: r.updatedAt.toISOString(),
         waitingHours: waiting(r.createdAt, now),
+        waitingDays: waitingDays(r.createdAt, now),
         version: r.version,
       }));
     });

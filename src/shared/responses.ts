@@ -230,6 +230,8 @@ export interface DailyMisListRow {
   /** F39 */
   accuracyZero: string | null;
   status: ReportStatus;
+  /** Set when the row was returned. Null on every other status. */
+  returnReason: string | null;
   enteredBy: string;
   /** Last modified (instant). */
   updatedAt: string;
@@ -307,6 +309,8 @@ export interface DailyMisDetail {
   reopenReason: string | null;
   /** Hours from first save to Approve (or now) — D-30. */
   waitingHours: number;
+  /** Whole days from the first save, floored. The same number on every screen. */
+  waitingDays: number;
   revisions: DailyMisRevisionRef[];
   can: DailyMisPermissions;
 }
@@ -328,6 +332,8 @@ export interface ApprovalQueueItem {
   enteredBy: string;
   lastSavedAt: string;
   waitingHours: number;
+  /** Whole days from the first save, floored. The same number on every screen. */
+  waitingDays: number;
   version: number;
 }
 
@@ -418,6 +424,8 @@ export interface MonthlyMisDetail {
   reopenedAt: string | null;
   reopenReason: string | null;
   waitingHours: number;
+  /** Whole days from the first save, floored. The same number on every screen. */
+  waitingDays: number;
   can: DailyMisPermissions;
 }
 
@@ -693,6 +701,8 @@ export interface ReviewCheckRow {
   statutory: StatusCounts;
   internal: StatusCounts;
   status: CheckStatus;
+  /** Overdue observations + expired statutory licences + 1 when the contract has ended. */
+  criticalItems: number;
 }
 
 export interface ReviewCheckPage {
@@ -826,10 +836,12 @@ export interface PerformancePoint {
   label: string;
   from: string;
   to: string;
-  /** Approved bottling despatches (MT): Daily 11 + 13. */
-  achieved: string;
+  /** Approved bottling despatches (MT). Null when that bucket has no approved Daily MIS. */
+  achieved: string | null;
   /** Projected bottling for the FY spread evenly per day (MT). */
   target: string;
+  /** True when a saved Daily MIS in the bucket is not approved yet. */
+  pending: boolean;
 }
 
 export interface PlantPerformance {
@@ -914,8 +926,11 @@ export interface GraphChart {
    * second y-axis on one chart, D-128); series without one share the chart's unit.
    */
   series: { key: string; label: string; unit?: string }[];
-  /** One point per day or month; values are numbers as strings (null = no saved value). */
-  points: { label: string; values: Record<string, string | null> }[];
+  /**
+   * One point per day or month. Values are numbers as strings.
+   * Null means no row. `pending` means a row exists and is not approved.
+   */
+  points: { label: string; values: Record<string, string | null>; pending?: boolean }[];
   /** The same numbers as a small table under the chart (GR-0). */
   table: { columns: string[]; rows: (string | null)[][] };
   note: string | null;
