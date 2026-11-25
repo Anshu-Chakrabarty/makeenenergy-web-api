@@ -9,6 +9,7 @@ import type { FieldDef } from '../fields/types';
 import { isIsoDate } from '../ist';
 import { computeDailyMisDerived, type DailyMisDerived } from '../rules/daily-mis';
 import { FIELD_MESSAGES, pastIsoDate, valueSchemaFor } from './field-values';
+import { gridQueryShape, type GridFieldMap } from './grid';
 
 /** Exact texts for the Daily MIS screens and the approval queue. */
 export const DAILY_MIS_MESSAGES = {
@@ -69,8 +70,32 @@ export const dailyMisSaveSchema = z.object({
 });
 export type DailyMisSaveInput = z.infer<typeof dailyMisSaveSchema>;
 
-/** Daily MIS table filters (BTN-P1): plant (one or all), date or date range, status. */
+/**
+ * Columns of the Daily MIS grid that can be filtered and sorted (keys = `DailyMisListRow` keys,
+ * `plant` = plant name). The API maps each to its column; the grid builds its filter row from it.
+ */
+export const DAILY_MIS_GRID_FIELDS = {
+  plant: { kind: 'text', label: 'Plant' },
+  reportDate: { kind: 'date', label: 'Date' },
+  physicalStock: { kind: 'number', scale: 3, label: 'Physical stock (MT)' },
+  bottlingDespatches: { kind: 'number', scale: 3, label: 'Bottling despatches (MT)' },
+  cylFilled142: { kind: 'number', scale: 0, label: 'Cyl. filled 14.2 kg' },
+  cylFilled19: { kind: 'number', scale: 0, label: 'Cyl. filled 19 kg' },
+  cylFilledOther: { kind: 'number', scale: 0, label: 'Cyl. filled 5 / 35 / 47.5 / 425 kg' },
+  carouselsOperated: { kind: 'number', scale: 0, label: 'Carousels operated' },
+  stockGainLoss: { kind: 'number', scale: 3, label: 'Stock loss / gain (MT)' },
+  accuracyZero: { kind: 'number', scale: 2, label: 'Accuracy (%)' },
+  status: { kind: 'enum', options: REPORT_STATUSES, label: 'Status' },
+  updatedAt: { kind: 'date', instant: true, label: 'Last modified (IST)' },
+} as const satisfies GridFieldMap;
+export type DailyMisGridField = keyof typeof DAILY_MIS_GRID_FIELDS;
+
+/**
+ * Daily MIS table filters (BTN-P1): plant (one or all), date or date range, status, plus the
+ * grid's column filters, search and sort.
+ */
 const dailyMisFilterShape = z.object({
+  ...gridQueryShape(DAILY_MIS_GRID_FIELDS),
   plantId: z.uuid().optional(),
   from: z
     .string()
