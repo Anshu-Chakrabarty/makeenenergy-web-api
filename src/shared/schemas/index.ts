@@ -6,6 +6,7 @@ export * from './common-passwords';
 export * from './daily-exception';
 export * from './daily-mis';
 export * from './field-values';
+export * from './grid';
 export * from './insights';
 export * from './keka';
 export * from './monthly-mis';
