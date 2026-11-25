@@ -1,5 +1,5 @@
 import { ApiTags } from '@nestjs/swagger';
-import { Controller, Get, HttpStatus } from '@nestjs/common';
+import { Controller, Delete, Get, HttpStatus } from '@nestjs/common';
 import { SignedIn } from '../../common/access/access.decorators';
 import { CurrentActor, type Actor } from '../../common/auth/actor';
 import { AppError, ErrorCode } from '../../common/errors/app-error';
@@ -58,5 +58,26 @@ export class MeController {
       plants: profile.plants,
       access: { modules: profile.modules, actions: profile.actions },
     };
+  }
+
+  @Delete('photo')
+  async removePhoto(@CurrentActor() actor: Actor): Promise<{ success: boolean; message: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: actor.userId },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new AppError(HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHENTICATED, 'Please sign in.');
+    }
+    await this.prisma.user.update({
+      where: { id: actor.userId },
+      data: { photoUrl: null },
+    });
+    return { success: true, message: 'Profile picture removed successfully.' };
+  }
+
+  @Delete('picture')
+  async removePicture(@CurrentActor() actor: Actor): Promise<{ success: boolean; message: string }> {
+    return this.removePhoto(actor);
   }
 }
