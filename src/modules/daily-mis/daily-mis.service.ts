@@ -9,9 +9,18 @@ import {
   type PlantScope,
 } from '../../common/access/plant-scope';
 import type { RequestContext } from '../../common/security/request-context';
+import {
+  compareNullableDecimal,
+  gridNumberMatches,
+  gridOrderBy,
+  gridWhere,
+  type GridColumnMap,
+} from '../../common/grid/prisma-grid';
 import { Prisma } from '../../generated/prisma/client';
 import {
+  DAILY_MIS_GRID_FIELDS,
   DAILY_MIS_MESSAGES,
+  REPORT_STATUSES,
   firstDayOfMonth,
   formatDate,
   fromScaled,
@@ -29,6 +38,7 @@ import {
   type DailyMisRevision,
   type DailyMisSaveInput,
   type DailyMisTotals,
+  type GridSort,
   type PersonRef,
   type ReportStatus,
 } from '../../shared';
@@ -85,6 +95,47 @@ type ListRecord = Prisma.DailyMisGetPayload<{ select: typeof listSelect }>;
 
 const fixed = (v: Prisma.Decimal | null, dp: number): string | null =>
   v === null ? null : v.toFixed(dp);
+
+/** Bottling despatches = F11 + F13; null when both are blank. */
+const despatchOf = (r: {
+  normalCylinderDespatch: Prisma.Decimal | null;
+  otCylinderDespatch: Prisma.Decimal | null;
+}): string | null =>
+  r.normalCylinderDespatch === null && r.otCylinderDespatch === null
+    ? null
+    : (r.normalCylinderDespatch ?? new Prisma.Decimal(0))
+        .add(r.otCylinderDespatch ?? new Prisma.Decimal(0))
+        .toFixed(3);
+const despatchSelect = {
+  id: true,
+  normalCylinderDespatch: true,
+  otCylinderDespatch: true,
+} as const satisfies Prisma.DailyMisSelect;
+
+/** Table order when no column is sorted; also the tie-breaker of every sort (stable paging). */
+const DEFAULT_ORDER: readonly Prisma.DailyMisOrderByWithRelationInput[] = [
+  { reportDate: 'desc' },
+  { plant: { name: 'asc' } },
+  { createdAt: 'desc' },
+];
+
+/**
+ * Grid fields stored as columns. `bottlingDespatches` is derived (F11 + F13), so its filter and
+ * sort run in memory over the same `where` (bounded by the 366-day window, D-131).
+ */
+const GRID_COLUMNS: GridColumnMap = {
+  plant: { path: ['plant', 'name'] },
+  reportDate: { path: ['reportDate'] },
+  physicalStock: { path: ['physicalStock'], nullable: true },
+  cylFilled142: { path: ['cylFilled142'], nullable: true },
+  cylFilled19: { path: ['cylFilled19'], nullable: true },
+  cylFilledOther: { path: ['cylFilledOther'], nullable: true },
+  carouselsOperated: { path: ['carouselsOperated'], nullable: true },
+  stockGainLoss: { path: ['stockGainLoss'], nullable: true },
+  accuracyZero: { path: ['accuracyZero'], nullable: true },
+  status: { path: ['status'] },
+  updatedAt: { path: ['updatedAt'] },
+};
 
 /** Locked row (FOR UPDATE) with the fields every transition checks. */
 interface Locked {
@@ -145,19 +196,92 @@ export class DailyMisService {
     return { from, to };
   }
 
-  /** The one query object behind the table AND its download (BEV-6). */
-  private where(
+  /**
+   * The one query object behind the table AND its download (BEV-6): plant scope, date window,
+   * status, the grid's column filters and its search. Without `withStatus` (the KPI cards) both
+   * status filters are left out, so each card counts its own status.
+   */
+  private async where(
+    tx: Tx,
     scope: PlantScope,
     f: DailyMisFilter,
     withStatus: boolean,
-  ): Prisma.DailyMisWhereInput {
+  ): Promise<Prisma.DailyMisWhereInput> {
     const { from, to } = this.range(f);
-    return {
+    const filters = withStatus ? f.filters : f.filters.filter((x) => x.field !== 'status');
+    const and = gridWhere(
+      filters,
+      DAILY_MIS_GRID_FIELDS,
+      GRID_COLUMNS,
+    ) as Prisma.DailyMisWhereInput[];
+    if (f.q) and.push(this.search(f.q));
+    const base: Prisma.DailyMisWhereInput = {
       ...(scope.all ? {} : { plantId: { in: scope.plantIds } }),
       reportDate: { gte: dateOf(from), lte: dateOf(to) },
       plant: { deletedAt: null },
       ...(withStatus && f.status ? { status: f.status } : {}),
+      ...(and.length > 0 ? { AND: and } : {}),
     };
+    const derived = filters.filter((x) => x.field === 'bottlingDespatches');
+    if (derived.length === 0) return base;
+    const rows = await tx.dailyMis.findMany({ where: base, select: despatchSelect });
+    const ids = rows
+      .filter((r) => derived.every((d) => gridNumberMatches(despatchOf(r), d, 3)))
+      .map((r) => r.id);
+    return { ...base, id: { in: ids } };
+  }
+
+  /** Global search: plant name or code, or a status whose name contains the text. */
+  private search(q: string): Prisma.DailyMisWhereInput {
+    const text = q.toLowerCase();
+    const statuses = REPORT_STATUSES.filter((s) => s.toLowerCase().includes(text));
+    return {
+      OR: [
+        { plant: { name: { contains: q, mode: 'insensitive' } } },
+        { plant: { code: { contains: q, mode: 'insensitive' } } },
+        ...(statuses.length > 0 ? [{ status: { in: [...statuses] } }] : []),
+      ],
+    };
+  }
+
+  /** Rows of the filter in the grid's order; `take` undefined = all (download). */
+  private async ordered(
+    tx: Tx,
+    where: Prisma.DailyMisWhereInput,
+    sort: GridSort | undefined,
+    skip: number,
+    take: number | undefined,
+  ): Promise<ListRecord[]> {
+    const orderBy = gridOrderBy(sort, GRID_COLUMNS, DEFAULT_ORDER);
+    if (orderBy !== null || sort === undefined) {
+      return tx.dailyMis.findMany({
+        where,
+        select: listSelect,
+        orderBy: orderBy ?? [...DEFAULT_ORDER],
+        skip,
+        ...(take === undefined ? {} : { take }),
+      });
+    }
+    // Derived sort (bottling despatches). Array.sort is stable, so ties keep the default order.
+    const all = await tx.dailyMis.findMany({
+      where,
+      select: despatchSelect,
+      orderBy: [...DEFAULT_ORDER],
+    });
+    const ids = all
+      .map((r) => ({ id: r.id, v: despatchOf(r) }))
+      .sort((a, b) => compareNullableDecimal(a.v, b.v, 3, sort.dir))
+      .slice(skip, take === undefined ? undefined : skip + take)
+      .map((r) => r.id);
+    const records = await tx.dailyMis.findMany({
+      where: { id: { in: ids } },
+      select: listSelect,
+    });
+    const byId = new Map(records.map((r) => [r.id, r]));
+    return ids.flatMap((id) => {
+      const r = byId.get(id);
+      return r ? [r] : [];
+    });
   }
 
   private async names(tx: Tx, ids: readonly (string | null)[]): Promise<Map<string, string>> {
@@ -171,12 +295,7 @@ export class DailyMisService {
   }
 
   private toListRow(r: ListRecord, names: Map<string, string>): DailyMisListRow {
-    const despatch =
-      r.normalCylinderDespatch === null && r.otCylinderDespatch === null
-        ? null
-        : (r.normalCylinderDespatch ?? new Prisma.Decimal(0))
-            .add(r.otCylinderDespatch ?? new Prisma.Decimal(0))
-            .toFixed(3);
+    const despatch = despatchOf(r);
     return {
       id: r.id,
       plant: r.plant,
@@ -254,18 +373,12 @@ export class DailyMisService {
     const scope = plantFilter(access, q.plantId, NEED.view);
     const { from, to } = this.range(q);
     return this.asActor(access, async (tx) => {
-      const where = this.where(scope, q, true);
-      const records = await tx.dailyMis.findMany({
-        where,
-        select: listSelect,
-        orderBy: [{ reportDate: 'desc' }, { plant: { name: 'asc' } }, { createdAt: 'desc' }],
-        skip: (q.page - 1) * q.pageSize,
-        take: q.pageSize,
-      });
+      const where = await this.where(tx, scope, q, true);
+      const records = await this.ordered(tx, where, q.sort, (q.page - 1) * q.pageSize, q.pageSize);
       const total = await tx.dailyMis.count({ where });
       const byStatus = await tx.dailyMis.groupBy({
         by: ['status'],
-        where: this.where(scope, q, false),
+        where: await this.where(tx, scope, q, false),
         _count: { _all: true },
       });
       const count = (s: ReportStatus): number =>
@@ -309,7 +422,7 @@ export class DailyMisService {
     const scope = plantFilter(access, f.plantId, NEED.download);
     const { from, to } = this.range(f);
     return this.asActor(access, async (tx) => {
-      const where = this.where(scope, f, true);
+      const where = await this.where(tx, scope, f, true);
       const total = await tx.dailyMis.count({ where });
       if (total > EXPORT_MAX_ROWS) {
         throw new AppError(
@@ -318,11 +431,7 @@ export class DailyMisService {
           'Too many rows for one download. Choose a shorter date range or one plant.',
         );
       }
-      const records = await tx.dailyMis.findMany({
-        where,
-        select: listSelect,
-        orderBy: [{ reportDate: 'desc' }, { plant: { name: 'asc' } }, { createdAt: 'desc' }],
-      });
+      const records = await this.ordered(tx, where, f.sort, 0, undefined);
       const names = await this.names(
         tx,
         records.map((r) => r.enteredById),
