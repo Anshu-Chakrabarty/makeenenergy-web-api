@@ -12,7 +12,9 @@ import {
   FIELD_MESSAGES,
   addDays,
   istToday,
+  serializeGridFilters,
   type ApprovalQueueItem,
+  type GridFilter,
   type DailyMisDetail,
   type DailyMisPage,
   type DailyMisRevision,
@@ -430,6 +432,153 @@ describe('table, cards, plant scope (DMIS-T*, CARD-2, GEN-1)', () => {
     });
     expect(page.total).toBe(n('PENDING'));
     expect(page.rows.every((r) => r.status === 'PENDING')).toBe(true);
+  });
+});
+
+describe('grid: column filters, search, sort (read-only over the seeded October)', () => {
+  const RANGE = 'from=2026-10-01&to=2026-10-16';
+  const SQL_RANGE = `m.report_date BETWEEN '2026-10-01' AND '2026-10-16' AND p.deleted_at IS NULL`;
+  const grid = (filters: GridFilter[], extra = ''): string =>
+    `/api/daily-mis?${RANGE}&pageSize=200&filters=${encodeURIComponent(
+      serializeGridFilters(filters) ?? '',
+    )}${extra}`;
+  const count = async (cond: string, params: unknown[] = []): Promise<number> =>
+    (
+      await db.query<{ n: number }>(
+        `SELECT count(*)::int n FROM daily_mis m JOIN plants p ON p.id = m.plant_id
+          WHERE ${SQL_RANGE} AND ${cond}`,
+        params,
+      )
+    ).rows[0]?.n ?? 0;
+
+  it('number operators match SQL, including the derived bottling despatches', async () => {
+    const admin = await as(ANITA);
+    const gt = (
+      await call(admin, 'get', grid([{ field: 'physicalStock', op: 'gt', value: '300' }])).expect(
+        200,
+      )
+    ).body as DailyMisPage;
+    expect(gt.total).toBe(await count('m.physical_stock > 300'));
+    expect(gt.rows.every((r) => Number(r.physicalStock) > 300)).toBe(true);
+    const between = (
+      await call(
+        admin,
+        'get',
+        grid([{ field: 'bottlingDespatches', op: 'between', value: '100', value2: '250' }]),
+      ).expect(200)
+    ).body as DailyMisPage;
+    expect(between.total).toBe(
+      await count(
+        `(m.normal_cylinder_despatch IS NOT NULL OR m.ot_cylinder_despatch IS NOT NULL)
+         AND COALESCE(m.normal_cylinder_despatch,0) + COALESCE(m.ot_cylinder_despatch,0) BETWEEN 100 AND 250`,
+      ),
+    );
+    // Totals cover the filter, not the whole range.
+    expect(between.totals.rows).toBe(between.total);
+  });
+
+  it('text, enum and search narrow the rows; cards ignore only the status filter', async () => {
+    const admin = await as(ANITA);
+    const text = (
+      await call(admin, 'get', grid([{ field: 'plant', op: 'contains', value: 'yediy' }])).expect(
+        200,
+      )
+    ).body as DailyMisPage;
+    expect(text.total).toBe(await count(`p.name ILIKE '%yediy%'`));
+    expect(text.total).toBeGreaterThan(0);
+    const both = (
+      await call(
+        admin,
+        'get',
+        grid([
+          { field: 'plant', op: 'contains', value: 'yediy' },
+          { field: 'status', op: 'in', values: ['APPROVED'] },
+        ]),
+      ).expect(200)
+    ).body as DailyMisPage;
+    expect(both.rows.every((r) => r.status === 'APPROVED')).toBe(true);
+    expect(both.cards.approved).toBe(both.total);
+    expect(both.cards.approved + both.cards.pending + both.cards.returned + both.cards.draft).toBe(
+      text.total,
+    );
+    const q = (
+      await call(admin, 'get', `/api/daily-mis?${RANGE}&pageSize=200&q=HPY-011`).expect(200)
+    ).body as DailyMisPage;
+    expect(q.total).toBe(await count(`p.code::text = 'HPY-011'`));
+  });
+
+  it('sorts by a column (blanks last) and by the derived value, with stable paging', async () => {
+    const admin = await as(ANITA);
+    const asc = (
+      await call(admin, 'get', `/api/daily-mis?${RANGE}&pageSize=200&sort=accuracyZero:asc`).expect(
+        200,
+      )
+    ).body as DailyMisPage;
+    const acc = asc.rows.map((r) => r.accuracyZero);
+    const firstBlank = acc.indexOf(null);
+    const numbers = (firstBlank < 0 ? acc : acc.slice(0, firstBlank)).map(Number);
+    expect(numbers).toEqual([...numbers].sort((a, b) => a - b));
+    if (firstBlank >= 0) expect(acc.slice(firstBlank).every((v) => v === null)).toBe(true);
+    const sort = 'sort=bottlingDespatches:desc';
+    const all = (
+      await call(admin, 'get', `/api/daily-mis?${RANGE}&pageSize=200&${sort}`).expect(200)
+    ).body as DailyMisPage;
+    const p2 = (
+      await call(admin, 'get', `/api/daily-mis?${RANGE}&pageSize=5&page=2&${sort}`).expect(200)
+    ).body as DailyMisPage;
+    expect(p2.rows.map((r) => r.id)).toEqual(all.rows.slice(5, 10).map((r) => r.id));
+    const d = all.rows
+      .map((r) => r.bottlingDespatches)
+      .filter((v) => v !== null)
+      .map(Number);
+    expect(d).toEqual([...d].sort((a, b) => b - a));
+  });
+
+  it('refuses unknown columns, wrong operators and bad values with VALIDATION_FAILED', async () => {
+    const admin = await as(ANITA);
+    for (const bad of [
+      `filters=${encodeURIComponent('[{"field":"enteredById","op":"equals","value":"x"}]')}`,
+      `filters=${encodeURIComponent('[{"field":"physicalStock","op":"contains","value":"1"}]')}`,
+      `filters=${encodeURIComponent('[{"field":"physicalStock","op":"gt","value":"1;drop"}]')}`,
+      'filters=not-json',
+      'sort=enteredBy:asc',
+    ]) {
+      const res = await call(admin, 'get', `/api/daily-mis?${RANGE}&${bad}`).expect(400);
+      expect((res.body as { code: string }).code).toBe('VALIDATION_FAILED');
+    }
+  });
+
+  it('the download uses the same grid filter: Excel totals equal the list totals', async () => {
+    const admin = await as(ANITA);
+    const filters = encodeURIComponent(
+      serializeGridFilters([{ field: 'physicalStock', op: 'gte', value: '200' }]) ?? '',
+    );
+    const qs = `${RANGE}&filters=${filters}&sort=physicalStock:desc`;
+    const page = (await call(admin, 'get', `/api/daily-mis?${qs}`).expect(200))
+      .body as DailyMisPage;
+    const res = await call(admin, 'get', `/api/daily-mis/export?${qs}&format=xlsx`)
+      .buffer(true)
+      .parse(binary)
+      .expect(200);
+    const wb = new ExcelJS.Workbook();
+    const body = res.body as Buffer;
+    const ab = new ArrayBuffer(body.length);
+    new Uint8Array(ab).set(body);
+    await wb.xlsx.load(ab);
+    const ws = wb.worksheets[0];
+    if (!ws) throw new Error('no sheet');
+    let totalsRow = 0;
+    let header = '';
+    ws.eachRow((row, n) => {
+      const v = text(row.getCell(1).value);
+      if (v.startsWith('Total (')) totalsRow = n;
+      if (v.includes('Physical stock (MT) ≥ 200')) header = v;
+    });
+    const t = ws.getRow(totalsRow);
+    expect(text(t.getCell(1).value)).toBe(`Total (${String(page.totals.rows)} rows)`);
+    expect(t.getCell(5).value).toBe(Number(page.totals.bottlingDespatches));
+    expect(t.getCell(9).value).toBe(Number(page.totals.stockGainLoss));
+    expect(header).not.toBe('');
   });
 });
 

@@ -12,15 +12,21 @@ import {
 import type { RequestContext } from '../../common/security/request-context';
 import {
   DAILY_MIS_FIELDS,
+  DAILY_MIS_GRID_FIELDS,
   DAILY_MIS_SECTIONS,
+  describeGridFilter,
   formatDate,
   formatDateTimeIst,
   formatMonthYear,
   formatNumber,
+  serializeGridFilters,
+  serializeGridSort,
   type DailyMisDetail,
   type DailyMisFilter,
+  type DailyMisGridField,
   type DailyMisListRow,
   type FieldDef,
+  type ReportStatus,
 } from '../../shared';
 import type { ResolvedAccess } from '../access/access.service';
 import { AuditAction, AuditLogService } from '../audit-log/audit-log.service';
@@ -32,6 +38,21 @@ export const STATUS_LABEL = {
   APPROVED: 'Approved',
   RETURNED: 'Returned',
 };
+
+/** The grid's column filters and search, for the file header (the file states what it holds). */
+function gridText(f: DailyMisFilter): string {
+  const parts = f.filters.map((x) => {
+    const def = DAILY_MIS_GRID_FIELDS[x.field as DailyMisGridField];
+    const show = (v: string): string => {
+      if (def.kind === 'enum') return STATUS_LABEL[v as ReportStatus];
+      if (def.kind === 'date') return formatDate(v);
+      return v;
+    };
+    return describeGridFilter(x, def.label, show);
+  });
+  if (f.q) parts.push(`Search “${f.q}”`);
+  return parts.length > 0 ? ` · ${parts.join(' · ')}` : '';
+}
 
 /** Columns of the Daily MIS table (DMIS-T1…T10), the same in Excel and PDF. */
 const COLUMNS: readonly ReportColumn<DailyMisListRow>[] = [
@@ -94,7 +115,7 @@ export class DailyMisExport {
       reportName: 'Daily MIS',
       subtitle: `${data.plantName ?? 'All plants this login may see'} · ${period}${
         filter.status ? ` · ${STATUS_LABEL[filter.status]}` : ''
-      } · ${formatNumber(t.rows, 0)} rows`,
+      }${gridText(filter)} · ${formatNumber(t.rows, 0)} rows`,
       columns: COLUMNS,
       rows: data.rows,
       totals: [
@@ -121,7 +142,19 @@ export class DailyMisExport {
       entity: 'daily_mis',
       entityId: reportId,
       actorId: access.userId,
-      after: { format, filter: { ...filter }, rows: t.rows },
+      after: {
+        format,
+        filter: {
+          plantId: filter.plantId ?? null,
+          from: filter.from ?? null,
+          to: filter.to ?? null,
+          status: filter.status ?? null,
+          filters: serializeGridFilters(filter.filters) ?? null,
+          q: filter.q ?? null,
+          sort: serializeGridSort(filter.sort) ?? null,
+        },
+        rows: t.rows,
+      },
       ctx,
     });
     const stem = `daily-mis_${data.from}_${data.to}`;
