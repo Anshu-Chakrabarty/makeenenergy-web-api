@@ -35,7 +35,8 @@ function lines(over: Record<string, { answer: Answer; details?: object }> = {}) 
   const out: Record<string, { answer: Answer; details: object }> = {};
   for (let n = 1; n <= 13; n += 1) {
     const o = over[String(n)];
-    out[String(n)] = { answer: o ? o.answer : 'NO', details: o?.details ?? {} };
+    const passing: Answer = n === 11 || n === 13 ? 'NO' : 'YES';
+    out[String(n)] = { answer: o ? o.answer : passing, details: o?.details ?? {} };
   }
   return out;
 }
@@ -245,7 +246,7 @@ describe('save and submit (DEX-R2…R7, UXV-9, APPR-6)', () => {
         plantId: yediyur,
         reportDate: '2026-06-03',
         lines: lines({
-          '3': { answer: 'YES', details: { jockeyPump1: 'AUTO' } },
+          '3': { answer: 'NO', details: { jockeyPump1: 'AUTO' } },
           '9': { answer: null },
           '13': { answer: 'YES' },
         }),
@@ -262,7 +263,7 @@ describe('save and submit (DEX-R2…R7, UXV-9, APPR-6)', () => {
     );
   });
 
-  it('all No + Operational → Completed; the client cannot set status or highlight', async () => {
+  it('every check passing + Operational → Completed; the client cannot set status or highlight', async () => {
     const asha = await as(ASHA);
     const r = await save(
       asha,
@@ -274,17 +275,17 @@ describe('save and submit (DEX-R2…R7, UXV-9, APPR-6)', () => {
         plantStatus: 'OPERATIONAL',
         status: 'PENDING',
         problemHighlight: 'forged',
-        lines: lines({ '1': { answer: 'NO', details: { remarks: 'cleared on No' } } }),
+        lines: lines({ '1': { answer: 'YES', details: { remarks: 'working' } } }),
       },
       id,
     ).expect(200);
     const d = r.body as DailyExceptionDetail;
     expect(d).toMatchObject({ status: 'COMPLETED', problemHighlight: null, version: version + 1 });
-    expect(d.lines['1']).toEqual({ answer: 'NO', details: {} });
+    expect(d.lines['1']).toEqual({ answer: 'YES', details: {} });
     version = d.version;
   });
 
-  it('a Yes line makes it Pending with the highlight; edits are allowed (no Approve lock)', async () => {
+  it('a failed line makes it Pending with the highlight; edits are allowed (no Approve lock)', async () => {
     const asha = await as(ASHA);
     const r = await save(
       asha,
@@ -296,7 +297,7 @@ describe('save and submit (DEX-R2…R7, UXV-9, APPR-6)', () => {
         plantStatus: 'OPERATIONAL',
         lines: lines({
           '4': {
-            answer: 'YES',
+            answer: 'NO',
             details: {
               tankCount: '1',
               tankCapacityKl: '450',
@@ -308,7 +309,7 @@ describe('save and submit (DEX-R2…R7, UXV-9, APPR-6)', () => {
               pumpableWaterKl: '380',
             },
           },
-          '6': { answer: 'YES', details: { remarks: 'ESD button 3 stuck' } },
+          '6': { answer: 'NO', details: { remarks: 'ESD button 3 stuck' } },
         }),
       },
       id,
@@ -327,7 +328,7 @@ describe('save and submit (DEX-R2…R7, UXV-9, APPR-6)', () => {
     expect(stale.body.message).toBe(DAILY_EXCEPTION_MESSAGES.stale);
   });
 
-  it('Non-operational with every line No is Pending (D-20); there is no approve route', async () => {
+  it('Non-operational with every check passing is Pending (D-20); there is no approve route', async () => {
     const asha = await as(ASHA);
     const r = await save(asha, {
       action: 'submit',

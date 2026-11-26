@@ -164,10 +164,10 @@ export const REPORT_STATUS_TEXT = {
 } as const;
 
 export const EXCEPTION_STATUS_TEXT = {
-  COMPLETED: 'Completed',
-  PENDING: 'Pending',
-  PARTIAL: 'Partial',
-  NOT_INITIATED: 'Not initiated',
+  COMPLETED: 'All clear',
+  PENDING: 'Issue raised',
+  PARTIAL: 'Draft',
+  NOT_INITIATED: 'Not started',
 } as const;
 
 // ───────────────────────────────────────────── periods (pure; used by API and web)

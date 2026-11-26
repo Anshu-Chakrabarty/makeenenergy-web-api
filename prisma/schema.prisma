@@ -618,6 +618,7 @@ model DailyMis {
 
   @@unique([plantId, reportDate], map: "daily_mis_one_non_draft_per_plant_date", where: raw("status <> 'DRAFT'"))
   @@index([plantId, reportDate])
+  @@index([plantId, reportDate, status])
   @@index([status, createdAt])
   @@map("daily_mis")
 }
@@ -721,6 +722,7 @@ model MonthlyMis {
   inventoryItems MonthlyInventoryItem[]
 
   @@unique([plantId, month])
+  @@index([plantId, month, status])
   @@index([status, createdAt])
   @@map("monthly_mis")
 }

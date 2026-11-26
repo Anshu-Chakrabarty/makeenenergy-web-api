@@ -80,7 +80,9 @@ export class MonthlyMisExport {
     const t = data.totals;
     const spec = {
       reportName: 'Monthly MIS',
-      subtitle: `${data.plantName ?? 'All plants this login may see'} · ${formatMonthYear(data.month)}${
+      subtitle: `${data.plantName ?? 'All plants this login may see'}${
+        filter.month ? ` · ${formatMonthYear(filter.month)}` : ''
+      }${
         filter.status ? ` · ${STATUS_LABEL[filter.status]}` : ''
       } · ${formatNumber(t.rows, 0)} rows`,
       columns: COLUMNS,
@@ -107,12 +109,16 @@ export class MonthlyMisExport {
       entity: 'monthly_mis',
       entityId: reportId,
       actorId: access.userId,
-      after: { format, filter: { ...filter, month: data.month }, rows: t.rows },
+      after: {
+        format,
+        filter: { ...filter, ...(filter.month ? { month: filter.month } : {}) },
+        rows: t.rows,
+      },
       ctx,
     });
     return {
       body,
-      fileName: `monthly-mis_${data.month}.${format}`,
+      fileName: filter.month ? `monthly-mis_${filter.month}.${format}` : `monthly-mis.${format}`,
       contentType: format === 'xlsx' ? XLSX_TYPE : 'application/pdf',
     };
   }

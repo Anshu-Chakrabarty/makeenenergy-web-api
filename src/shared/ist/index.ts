@@ -166,3 +166,8 @@ export function financialYearRange(fy: string): { start: IsoDate; end: IsoDate }
 export function hoursBetween(from: Date, to: Date): number {
   return Math.max(0, (to.getTime() - from.getTime()) / 3_600_000);
 }
+
+/** Whole days from the first save, floored. The same number on every screen. */
+export function waitingDays(from: Date, to: Date): number {
+  return Math.floor(hoursBetween(from, to) / 24);
+}
