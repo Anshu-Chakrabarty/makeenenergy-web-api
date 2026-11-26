@@ -18,6 +18,7 @@ export const DAILY_MIS_MESSAGES = {
   reopenReasonRequired: 'Type the reason for reopening.',
   alreadySubmitted:
     'A Daily MIS for this plant and date is already submitted. Open that row instead.',
+  duplicate: 'A Daily MIS for this plant and date already exists. Open that row instead.',
   locked: 'This Daily MIS is Approved and locked. Only a reopen with a reason can change it.',
   stale: 'Someone else saved this Daily MIS. Reload it and try again.',
   notPending: 'Only a Pending Daily MIS can be approved or returned.',

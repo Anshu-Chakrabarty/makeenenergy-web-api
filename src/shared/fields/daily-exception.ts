@@ -37,6 +37,15 @@ export interface ExceptionLineDef {
   readonly incident?: boolean;
 }
 
+/**
+ * A positively worded check ("pumps are in working condition") fails on No.
+ * A check that starts with "Any" (a deviation or an incident) fails on Yes.
+ */
+export function failureWhen(def: Pick<ExceptionLineDef, 'question' | 'incident'>): 'YES' | 'NO' {
+  if (def.incident === true || def.question.startsWith('Any ')) return 'YES';
+  return 'NO';
+}
+
 const remarks = (no: number, placeholder = 'Enter remarks'): ExceptionDetailDef => ({
   no,
   key: 'remarks',

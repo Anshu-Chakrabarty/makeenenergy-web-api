@@ -16,6 +16,7 @@ import {
   firstDayOfMonth,
   hoursBetween,
   istToday,
+  waitingDays,
   lastDayOfMonth,
   licenceStatus,
   monthOf,
@@ -160,7 +161,12 @@ export class DashboardService {
       status: 'PENDING',
       plant: { deletedAt: null },
       ...plantIn(scope),
-      ...(period ? { month: { gte: dateOf(period.monthFrom), lte: dateOf(period.monthTo) } } : {}),
+      month: {
+        gte: dateOf(
+          period && period.monthFrom > '2024-04-01' ? period.monthFrom : '2024-04-01',
+        ),
+        ...(period ? { lte: dateOf(period.monthTo) } : {}),
+      },
     };
   }
 
@@ -213,7 +219,7 @@ export class DashboardService {
   ): Promise<{ due: number; expired: number }> {
     const today = istToday();
     const rows = await tx.licence.findMany({
-      where: { plant: { deletedAt: null }, ...plantIn(scope) },
+      where: { category: 'STATUTORY', plant: { deletedAt: null }, ...plantIn(scope) },
       select: { frequency: true, startDate: true, endDate: true, remindBeforeDays: true },
     });
     let due = 0;
@@ -324,6 +330,7 @@ export class DashboardService {
           enteredBy: names.get(r.enteredById) ?? '—',
           lastSavedAt: r.updatedAt.toISOString(),
           waitingHours: waiting(r.createdAt, now),
+          waitingDays: waitingDays(r.createdAt, now),
           version: r.version,
           can: can('DAILY_MIS', r.plant.id),
         },
@@ -338,6 +345,7 @@ export class DashboardService {
           enteredBy: names.get(r.enteredById) ?? '—',
           lastSavedAt: r.updatedAt.toISOString(),
           waitingHours: waiting(r.createdAt, now),
+          waitingDays: waitingDays(r.createdAt, now),
           version: r.version,
           can: can('MONTHLY_MIS', r.plant.id),
         },
@@ -357,7 +365,7 @@ export class DashboardService {
       where: { kind: 'yes_no', form: { code: 'DAILY', active: true } },
     });
     const rows = await tx.dailyException.findMany({
-      where: this.exceptionWhere(scope, period),
+      where: { ...this.exceptionWhere(scope, period), status: 'PENDING' },
       select: {
         id: true,
         reportDate: true,
@@ -397,7 +405,7 @@ export class DashboardService {
     if (!scope) {
       return {
         range,
-        points: buckets.map((b) => ({ ...b, achieved: '0.000', target: '0.000' })),
+        points: buckets.map((b) => ({ ...b, achieved: null, target: '0.000', pending: false })),
         totals: { achieved: '0.000', target: '0.000' },
       };
     }
@@ -412,6 +420,13 @@ export class DashboardService {
            AND (${list}::uuid[] IS NULL OR m.plant_id = ANY(${list}::uuid[]))
          GROUP BY m.report_date`);
       const achievedByDay = new Map(achievedRows.map((r) => [r.day, new Prisma.Decimal(r.mt)]));
+      const pendingRows = await tx.$queryRaw<{ day: string }[]>(Prisma.sql`
+        SELECT DISTINCT m.report_date::text AS day
+          FROM daily_mis m JOIN plants p ON p.id = m.plant_id
+         WHERE m.status <> 'APPROVED' AND p.deleted_at IS NULL
+           AND m.report_date BETWEEN ${first}::date AND ${last}::date
+           AND (${list}::uuid[] IS NULL OR m.plant_id = ANY(${list}::uuid[]))`);
+      const pendingDays = new Set(pendingRows.map((r) => r.day));
       const plants = await tx.plant.findMany({
         where: { deletedAt: null, status: 'WORKING', ...(list ? { id: { in: list } } : {}) },
         select: {
@@ -439,18 +454,25 @@ export class DashboardService {
       const points = buckets.map((b) => {
         let a = new Prisma.Decimal(0);
         let t = new Prisma.Decimal(0);
+        let sawApproved = false;
+        let pending = false;
         for (let d = b.from; d <= b.to; d = addDays(d, 1)) {
-          a = a.plus(achievedByDay.get(d) ?? 0);
+          const got = achievedByDay.get(d);
+          if (got !== undefined) {
+            a = a.plus(got);
+            sawApproved = true;
+          }
+          if (pendingDays.has(d)) pending = true;
           const cached = perDay.get(d) ?? targetOf(d);
           perDay.set(d, cached);
           t = t.plus(cached);
         }
         // Totals add the shown (rounded) values, so the table sums to its total row.
-        const achieved = a.toFixed(3);
+        const achieved = sawApproved ? a.toFixed(3) : null;
         const target = t.toFixed(3);
-        totalA = totalA.plus(achieved);
+        if (achieved !== null) totalA = totalA.plus(achieved);
         totalT = totalT.plus(target);
-        return { ...b, achieved, target };
+        return { ...b, achieved, target, pending };
       });
       return { range, points, totals: { achieved: totalA.toFixed(3), target: totalT.toFixed(3) } };
     });

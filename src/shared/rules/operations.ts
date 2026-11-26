@@ -158,23 +158,33 @@ export const CHECK_STATUS_LABEL: Readonly<Record<CheckStatus, string>> = {
 
 /**
  * Review Check status (RC-2, D-27):
- *   Critical  — any Overdue observation, any Expired licence, or the contract already ended
- *   Attention — any observation due in 7 days, any Due licence, or the contract ends in ≤ 90 days
+ *   Critical  — any Overdue observation, any Expired statutory licence, or the contract already ended
+ *   Attention — a due statutory licence, an expired or due calibration, an observation due in 7 days,
+ *               or the contract ends in ≤ 90 days
  *   OK        — otherwise
+ * A calibration does not by itself make the plant Critical.
  */
 export function reviewCheckStatus(
   p: {
     contractEnd: IsoDate;
     observationsOverdue: number;
     observationsDueSoon: number;
-    licencesExpired: number;
-    licencesDue: number;
+    statutoryExpired: number;
+    statutoryDue: number;
+    calibrationExpired: number;
+    calibrationDue: number;
   },
   today: IsoDate,
 ): CheckStatus {
-  if (p.observationsOverdue > 0 || p.licencesExpired > 0 || p.contractEnd < today)
+  if (p.observationsOverdue > 0 || p.statutoryExpired > 0 || p.contractEnd < today)
     return 'CRITICAL';
-  if (p.observationsDueSoon > 0 || p.licencesDue > 0 || contractEndingSoon(p.contractEnd, today))
+  if (
+    p.observationsDueSoon > 0 ||
+    p.statutoryDue > 0 ||
+    p.calibrationExpired > 0 ||
+    p.calibrationDue > 0 ||
+    contractEndingSoon(p.contractEnd, today)
+  )
     return 'ATTENTION';
   return 'OK';
 }

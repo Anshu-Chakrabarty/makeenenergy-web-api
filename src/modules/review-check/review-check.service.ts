@@ -78,19 +78,24 @@ export class ReviewCheckService {
           else if (s === 'EXPIRED') bucket.expired += 1;
         }
         const contractEnd = isoDay(p.endDate);
+        const criticalItems =
+          audit.overdue + statutory.expired + (contractEnd < today ? 1 : 0);
         return {
           plant: { id: p.id, name: p.name, code: p.code },
           contractEnd,
           audit,
           statutory,
           internal,
+          criticalItems,
           status: reviewCheckStatus(
             {
               contractEnd,
               observationsOverdue: audit.overdue,
               observationsDueSoon: audit.dueSoon,
-              licencesExpired: statutory.expired + internal.expired,
-              licencesDue: statutory.due + internal.due,
+              statutoryExpired: statutory.expired,
+              statutoryDue: statutory.due,
+              calibrationExpired: internal.expired,
+              calibrationDue: internal.due,
             },
             today,
           ),

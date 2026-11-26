@@ -275,8 +275,8 @@ const L = { unit: 'litres' } as const;
 
 /** B. Monthly Inputs 26–69 and 122 — stored as columns on monthly_mis. */
 export const MONTHLY_MIS_INPUT_FIELDS = [
-  field(26, 'ebUnits', 'Electricity units — EB', S.energy, 'units', { unit: 'kW' }),
-  field(27, 'dgUnits', 'Electricity units — DG set', S.energy, 'units', { unit: 'kW' }),
+  field(26, 'ebUnits', 'Electricity units — EB', S.energy, 'units', { unit: 'kWh' }),
+  field(27, 'dgUnits', 'Electricity units — DG set', S.energy, 'units', { unit: 'kWh' }),
   field(28, 'energyCharges', 'Monthly energy charges (incl GST)', S.energy, 'rupees', RS),
   field(29, 'electricityBill', 'Electricity bill', S.energy, 'rupees', RS),
   field(30, 'dieselBill', 'Diesel bill', S.energy, 'rupees', RS),
@@ -343,7 +343,7 @@ export const MONTHLY_MIS_INPUT_FIELDS = [
     placeholder: 'e.g. 100 kW',
     maxLength: 100,
   }),
-  field(54, 'solarUnits', 'Units generated through solar', S.training, 'units', { unit: 'kW' }),
+  field(54, 'solarUnits', 'Units generated through solar', S.training, 'units', { unit: 'kWh' }),
   field(55, 'capsUsedPct', '% caps used', S.spares, 'percent', PCT),
   field(56, 'sealsUsedPct', '% seals used', S.spares, 'percent', PCT),
   field(57, 'oRingsReplacedPct', '% O-rings replaced', S.spares, 'percent', PCT),

@@ -25,9 +25,9 @@ import { AuditAction, AuditLogService } from '../audit-log/audit-log.service';
 import { DailyExceptionsService } from './daily-exceptions.service';
 
 export const EXCEPTION_STATUS_LABEL: Record<ExceptionRowStatus, string> = {
-  COMPLETED: 'Completed',
-  PENDING: 'Pending',
-  PARTIAL: 'Partial',
+  COMPLETED: 'All clear',
+  PENDING: 'Issue raised',
+  PARTIAL: 'Draft',
   NOT_INITIATED: 'Not initiated',
 };
 
@@ -82,7 +82,7 @@ export class DailyExceptionsExport {
       totals: [
         `Total (${formatNumber(data.rows.length, 0)} rows)`,
         null,
-        `Completed ${String(c.completed)} · Submitted ${String(c.submitted)} · Pending ${String(c.pending)} · Partial ${String(c.partial)} · Not initiated ${String(c.notInitiated)}`,
+        `All clear ${String(c.completed)} · Submitted ${String(c.submitted)} · Issue raised ${String(c.pending)} · Draft ${String(c.partial)} · Not started ${String(c.notInitiated)}`,
         null,
         null,
         null,

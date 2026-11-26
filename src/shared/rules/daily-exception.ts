@@ -4,6 +4,7 @@
 import type { ExceptionStatus, PlantOperatingStatus, YesNo } from '../enums';
 import {
   DAILY_EXCEPTION_LINES,
+  failureWhen,
   type ExceptionDetailDef,
   type ExceptionLineDef,
 } from '../fields/daily-exception';
@@ -42,8 +43,8 @@ export function detailApplies(
 }
 
 /**
- * Normalise lines for storage (DEX-R6): every line 1–13 present; a line that is not Yes keeps no
- * extra fields; a Yes line keeps only the fields it shows (tank levels follow the tank count).
+ * Normalise lines for storage (DEX-R6): every line 1–13 present; a passing answer keeps no
+ * extra fields; a failing answer keeps only the fields it shows (tank levels follow the tank count).
  */
 export function cleanLines(
   lines: Partial<ExceptionLines>,
@@ -54,7 +55,7 @@ export function cleanLines(
     const line = lines[String(def.lineNo)];
     const answer = line?.answer ?? null;
     const details: Record<string, ExceptionDetailValue> = {};
-    if (answer === 'YES' && line) {
+    if (answer === failureWhen(def) && line) {
       for (const d of def.details) {
         const v = line.details[d.key];
         if (!blank(v) && detailApplies(d, line.details)) details[d.key] = v ?? null;
@@ -74,10 +75,11 @@ export function allAnswered(
 
 /**
  * Report status (DEX-S1…S3, D-20):
- *   Save draft                                   → Partial
- *   Submit, every line No, Operational           → Completed
- *   Submit, any Yes or an incident               → Pending
- *   Submit, every line No but Non-operational    → Pending (D-20)
+ *   Save draft                                      → Partial (draft)
+ *   Submit, every check passes, Operational        → Completed (all clear)
+ *   Submit, any check fails                         → Pending (issue raised)
+ *   Submit, every check passes but Non-operational → Pending (D-20)
+ * A working-condition check fails on No. "Any …" checks fail on Yes.
  */
 export function exceptionStatus(
   action: 'draft' | 'submit',
@@ -86,8 +88,8 @@ export function exceptionStatus(
   defs: readonly ExceptionLineDef[] = LINES,
 ): ExceptionStatus {
   if (action === 'draft') return 'PARTIAL';
-  const anyYes = defs.some((d) => lines[String(d.lineNo)]?.answer === 'YES');
-  return anyYes || plantStatus !== 'OPERATIONAL' ? 'PENDING' : 'COMPLETED';
+  const failed = defs.some((d) => lines[String(d.lineNo)]?.answer === failureWhen(d));
+  return failed || plantStatus !== 'OPERATIONAL' ? 'PENDING' : 'COMPLETED';
 }
 
 function shown(def: ExceptionDetailDef, v: ExceptionDetailValue): string {
@@ -122,8 +124,8 @@ function lineSummary(def: ExceptionLineDef, line: ExceptionLines[string]): strin
 }
 
 /**
- * Exceptions produced by a submitted form. Each Yes check is one exception. A non-operational
- * plant with no Yes check is one exception. A draft or a clean day produces none.
+ * Exceptions produced by a submitted form. Each failed check is one exception. A non-operational
+ * plant with no failed check is one exception. A draft or a clean day produces none.
  */
 export function formExceptions(
   status: ExceptionStatus,
@@ -135,7 +137,7 @@ export function formExceptions(
   const found: FormException[] = [];
   for (const def of defs) {
     const line = lines[String(def.lineNo)];
-    if (line?.answer !== 'YES') continue;
+    if (line?.answer !== failureWhen(def)) continue;
     found.push({
       fieldKey: `l${String(def.lineNo)}`,
       lineNo: def.lineNo,

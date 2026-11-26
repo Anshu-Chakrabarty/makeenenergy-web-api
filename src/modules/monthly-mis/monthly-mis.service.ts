@@ -17,6 +17,7 @@ import {
   formatMonthYear,
   hoursBetween,
   istCurrentMonth,
+  waitingDays,
   lastDayOfMonth,
   sumDecimals,
   type ApprovalQueueItem,
@@ -466,6 +467,7 @@ export class MonthlyMisService {
       reopenedAt: stamp(r.reopenedAt),
       reopenReason: r.reopenReason,
       waitingHours: waiting(r.createdAt, r.approvedAt ?? new Date()),
+      waitingDays: waitingDays(r.createdAt, r.approvedAt ?? new Date()),
       can: {
         edit: status !== 'APPROVED' && canOnPlant(access, r.plantId, NEED.submit),
         approve: status === 'PENDING' && canOnPlant(access, r.plantId, NEED.approve),
@@ -506,6 +508,42 @@ export class MonthlyMisService {
       });
   }
 
+  /** 0 is a real production figure. Submitting a month with no production needs a remark. */
+  private async assertZeroProductionExplained(
+    tx: Tx,
+    plantId: string,
+    month: string,
+    remarks: string | number | null | undefined,
+  ): Promise<void> {
+    const summed = await tx.dailyMis.aggregate({
+      where: {
+        plantId,
+        status: 'APPROVED',
+        reportDate: { gte: dateOf(firstDayOfMonth(month)), lte: dateOf(lastDayOfMonth(month)) },
+      },
+      _sum: {
+        normalCylinderDespatch: true,
+        normalTtLoading: true,
+        otCylinderDespatch: true,
+        otTtLoading: true,
+      },
+    });
+    const total = [
+      summed._sum.normalCylinderDespatch,
+      summed._sum.normalTtLoading,
+      summed._sum.otCylinderDespatch,
+      summed._sum.otTtLoading,
+    ].reduce((n, v) => n + Number(v ?? 0), 0);
+    if (total !== 0) return;
+    if (typeof remarks === 'string' && remarks.trim() !== '') return;
+    throw new AppError(
+      HttpStatus.BAD_REQUEST,
+      ErrorCode.VALIDATION_FAILED,
+      'Total production is 0. Add a remark explaining why before you submit.',
+      [{ path: 'values.remarks', message: 'Add a remark when production is 0.' }],
+    );
+  }
+
   /** Save draft / Submit for approval on a new row (MMIS-R1). One row per plant + month (D-31). */
   async create(
     access: ResolvedAccess,
@@ -518,6 +556,13 @@ export class MonthlyMisService {
     try {
       return await this.asActor(access, async (tx) => {
         await this.plantExists(tx, input.plantId);
+        if (submit)
+          await this.assertZeroProductionExplained(
+            tx,
+            input.plantId,
+            input.month,
+            input.values.remarks,
+          );
         const exists = await tx.monthlyMis.count({
           where: { plantId: input.plantId, month: monthDate(input.month) },
         });
@@ -603,6 +648,13 @@ export class MonthlyMisService {
     try {
       return await this.asActor(access, async (tx) => {
         const row = await this.lock(tx, id);
+        if (submit)
+          await this.assertZeroProductionExplained(
+            tx,
+            row.plantId,
+            input.month,
+            input.values.remarks,
+          );
         assertPlant(access, row.plantId, NEED.submit);
         if (row.status === 'APPROVED') throw conflict(MONTHLY_MIS_MESSAGES.locked);
         this.checkVersion(row, input.version);
@@ -797,6 +849,7 @@ export class MonthlyMisService {
       const rows = await tx.monthlyMis.findMany({
         where: {
           status: 'PENDING',
+          month: { gte: dateOf('2024-04-01') },
           plant: { deletedAt: null },
           ...(scope.all ? {} : { plantId: { in: scope.plantIds } }),
         },
@@ -825,6 +878,7 @@ export class MonthlyMisService {
         enteredBy: names.get(r.enteredById) ?? '—',
         lastSavedAt: r.updatedAt.toISOString(),
         waitingHours: waiting(r.createdAt, now),
+        waitingDays: waitingDays(r.createdAt, now),
         version: r.version,
       }));
     });
