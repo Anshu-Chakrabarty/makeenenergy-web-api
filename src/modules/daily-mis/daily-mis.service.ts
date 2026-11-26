@@ -207,7 +207,13 @@ export class DailyMisService {
     f: DailyMisFilter,
     withStatus: boolean,
   ): Promise<Prisma.DailyMisWhereInput> {
-    const { from, to } = this.range(f);
+    const dateRange: Prisma.DateTimeFilter | undefined =
+      f.from || f.to
+        ? {
+            ...(f.from ? { gte: dateOf(f.from) } : {}),
+            ...(f.to ? { lte: dateOf(f.to) } : {}),
+          }
+        : undefined;
     const filters = withStatus ? f.filters : f.filters.filter((x) => x.field !== 'status');
     const and = gridWhere(
       filters,
@@ -217,7 +223,7 @@ export class DailyMisService {
     if (f.q) and.push(this.search(f.q));
     const base: Prisma.DailyMisWhereInput = {
       ...(scope.all ? {} : { plantId: { in: scope.plantIds } }),
-      reportDate: { gte: dateOf(from), lte: dateOf(to) },
+      ...(dateRange ? { reportDate: dateRange } : {}),
       plant: { deletedAt: null },
       ...(withStatus && f.status ? { status: f.status } : {}),
       ...(and.length > 0 ? { AND: and } : {}),

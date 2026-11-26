@@ -176,7 +176,7 @@ export class MonthlyMisService {
   ): Prisma.MonthlyMisWhereInput {
     return {
       ...(scope.all ? {} : { plantId: { in: scope.plantIds } }),
-      month: monthDate(this.monthOf(f)),
+      ...(f.month ? { month: monthDate(f.month) } : {}),
       plant: { deletedAt: null },
       ...(withStatus && f.status ? { status: f.status } : {}),
     };
@@ -215,12 +215,62 @@ export class MonthlyMisService {
     return out;
   }
 
+  /** Items 1–25 from the Approved Daily rows of each plant + month in records (one query). */
+  private async liveSummariesForRecords(
+    tx: Tx,
+    records: readonly { plantId: string; month: Date }[],
+  ): Promise<Map<string, Summarised>> {
+    const out = new Map<string, Summarised>();
+    if (records.length === 0) return out;
+    const plantIds = [...new Set(records.map((r) => r.plantId))];
+    const months = [...new Set(records.map((r) => monthKey(r.month)))].sort();
+    const firstMonth = months[0];
+    const lastMonth = months[months.length - 1];
+    if (!firstMonth || !lastMonth) return out;
+    const rows = await tx.dailyMis.findMany({
+      where: {
+        plantId: { in: plantIds },
+        status: 'APPROVED',
+        reportDate: {
+          gte: dateOf(firstDayOfMonth(firstMonth)),
+          lte: dateOf(lastDayOfMonth(lastMonth)),
+        },
+      },
+      select: {
+        plantId: true,
+        reportDate: true,
+        ...Object.fromEntries(SUMMARY_DAILY_KEYS.map((k) => [k, true])),
+      },
+    });
+
+    const grouped = new Map<string, typeof rows>();
+    for (const row of rows) {
+      const key = `${row.plantId}:${monthKey(row.reportDate)}`;
+      const list = grouped.get(key);
+      if (list) {
+        list.push(row);
+      } else {
+        grouped.set(key, [row]);
+      }
+    }
+
+    for (const r of records) {
+      const key = `${r.plantId}:${monthKey(r.month)}`;
+      if (!out.has(key)) {
+        const mine = grouped.get(key) ?? [];
+        out.set(key, { items: summaryOf(mine), approvedDays: mine.length });
+      }
+    }
+    return out;
+  }
+
   /** Frozen figures for an Approved row with a snapshot; live figures otherwise. */
   private summaryFor(
-    r: { status: ReportStatus; summarySnapshot: Prisma.JsonValue; plantId: string },
+    r: { status: ReportStatus; summarySnapshot: Prisma.JsonValue; plantId: string; month: Date },
     live: Map<string, Summarised>,
   ): Summarised & { frozen: boolean } {
-    const live1 = live.get(r.plantId) ?? { items: summaryOf([]), approvedDays: 0 };
+    const key = `${r.plantId}:${monthKey(r.month)}`;
+    const live1 = live.get(key) ?? live.get(r.plantId) ?? { items: summaryOf([]), approvedDays: 0 };
     const frozen = r.status === 'APPROVED' ? summaryFromJson(r.summarySnapshot) : null;
     if (!frozen) return { ...live1, frozen: false };
     const days: unknown =
@@ -257,17 +307,12 @@ export class MonthlyMisService {
     scope: PlantScope,
     f: MonthlyMisFilter,
   ): Promise<{ rows: MonthlyMisListRow[]; totals: MonthlyMisTotals }> {
-    const month = this.monthOf(f);
     const records = await tx.monthlyMis.findMany({
       where: this.where(scope, f, true),
       select: listSelect,
-      orderBy: [{ plant: { name: 'asc' } }],
+      orderBy: [{ month: 'desc' }, { plant: { name: 'asc' } }],
     });
-    const live = await this.liveSummaries(
-      tx,
-      records.map((r) => r.plantId),
-      month,
-    );
+    const live = await this.liveSummariesForRecords(tx, records);
     const names = await this.names(
       tx,
       records.map((r) => r.enteredById),
@@ -277,16 +322,17 @@ export class MonthlyMisService {
   }
 
   /** CARD-3 “Not started”: plants in scope running that month with no Monthly MIS row (D-18). */
-  private async notStarted(tx: Tx, scope: PlantScope, month: string): Promise<number> {
+  private async notStarted(tx: Tx, scope: PlantScope, month?: string): Promise<number> {
     if (!scope.all && scope.plantIds.length === 0) return 0;
+    const targetMonth = month ?? defaultMonth();
     return tx.plant.count({
       where: {
         deletedAt: null,
         ...(scope.all ? {} : { id: { in: scope.plantIds } }),
         // WORKING plants from their start; a past contract end means an extension (D-15).
         status: 'WORKING',
-        startDate: { lte: dateOf(lastDayOfMonth(month)) },
-        monthlyMis: { none: { month: monthDate(month) } },
+        startDate: { lte: dateOf(lastDayOfMonth(targetMonth)) },
+        monthlyMis: { none: { month: monthDate(targetMonth) } },
       },
     });
   }
@@ -308,7 +354,7 @@ export class MonthlyMisService {
         approved: count('APPROVED'),
         returned: count('RETURNED'),
         draft: count('DRAFT'),
-        notStarted: await this.notStarted(tx, scope, month),
+        notStarted: await this.notStarted(tx, scope, q.month),
       };
       const start = (q.page - 1) * q.pageSize;
       return {
