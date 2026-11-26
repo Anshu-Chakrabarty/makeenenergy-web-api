@@ -23,7 +23,6 @@ import {
   DAILY_MIS_SECTIONS,
   DAILY_MIS_VALUE_FIELDS,
   REPORT_STATUSES,
-  addDays,
   formatDate,
   fromScaled,
   hoursBetween,
@@ -192,11 +191,15 @@ export class DailyMisService {
     return this.prisma.runAs({ userId: access.userId, isAdmin: access.isAdmin }, fn);
   }
 
-  /** Default range: the last 30 days through today, so the KPI cards match the table on load. */
+  /**
+   * Bounds for the Not-started count. The table applies a report date only when
+   * the caller sent one, so a missing start counts from each plant's own start
+   * and a missing end stops at today.
+   */
   range(f: DailyMisFilter): { from: string; to: string } {
     const today = istToday();
     const to = f.to ?? (f.from && f.from > today ? f.from : today);
-    const from = f.from ?? addDays(to, -29);
+    const from = f.from ?? '1970-01-01';
     return { from, to };
   }
 

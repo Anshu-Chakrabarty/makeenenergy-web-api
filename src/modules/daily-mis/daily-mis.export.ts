@@ -107,9 +107,15 @@ export class DailyMisExport {
     const reportId = newReportId();
     const generatedAt = new Date();
     const period =
-      data.from === data.to
-        ? formatDate(data.from)
-        : `${formatDate(data.from)} to ${formatDate(data.to)}`;
+      !filter.from && !filter.to
+        ? 'All dates'
+        : filter.from && filter.to
+          ? filter.from === filter.to
+            ? formatDate(filter.from)
+            : `${formatDate(filter.from)} to ${formatDate(filter.to)}`
+          : filter.from
+            ? `From ${formatDate(filter.from)}`
+            : `Up to ${formatDate(filter.to ?? data.to)}`;
     const t = data.totals;
     const spec = {
       reportName: 'Daily MIS',
@@ -157,7 +163,10 @@ export class DailyMisExport {
       },
       ctx,
     });
-    const stem = `daily-mis_${data.from}_${data.to}`;
+    const stem =
+      filter.from || filter.to
+        ? `daily-mis_${filter.from ?? 'open'}_${filter.to ?? 'open'}`
+        : 'daily-mis_all-dates';
     return {
       body,
       fileName: `${stem}.${format}`,

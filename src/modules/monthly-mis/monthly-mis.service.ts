@@ -508,7 +508,6 @@ export class MonthlyMisService {
       });
   }
 
-  /** Save draft / Submit for approval on a new row (MMIS-R1). One row per plant + month (D-31). */
   /** 0 is a real production figure. Submitting a month with no production needs a remark. */
   private async assertZeroProductionExplained(
     tx: Tx,
@@ -545,6 +544,7 @@ export class MonthlyMisService {
     );
   }
 
+  /** Save draft / Submit for approval on a new row (MMIS-R1). One row per plant + month (D-31). */
   async create(
     access: ResolvedAccess,
     input: MonthlyMisSaveInput,
