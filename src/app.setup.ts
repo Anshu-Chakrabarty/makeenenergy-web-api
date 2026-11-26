@@ -52,8 +52,13 @@ export function configureApp(app: NestExpressApplication): void {
     }),
   );
   app.use(cookieParser());
+  const corsOrigins =
+    env.NODE_ENV !== 'production'
+      ? Array.from(new Set([env.WEB_ORIGIN, 'http://localhost:3000', 'http://127.0.0.1:3000']))
+      : [env.WEB_ORIGIN];
+
   app.enableCors({
-    origin: [env.WEB_ORIGIN],
+    origin: corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Request-Id'],
